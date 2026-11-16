@@ -19,6 +19,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LabeledPrice,
+    MenuButtonWebApp,
     Message,
     PreCheckoutQuery,
     WebAppInfo,
@@ -209,6 +210,17 @@ async def main():
     me = await bot.get_me()
     log.info("✅ Бот запущен: @%s", me.username)
     await bot.delete_webhook(drop_pending_updates=True)
+    # Кнопка мини-апки слева от поля ввода (для всех пользователей)
+    if WEBAPP_URL:
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="KlyxVPN", web_app=WebAppInfo(url=WEBAPP_URL))
+            )
+            log.info("✅ Кнопка меню установлена: %s", WEBAPP_URL)
+        except Exception as e:
+            log.warning("Не удалось поставить кнопку меню: %s", e)
+    else:
+        log.warning("WEBAPP_URL не задан — кнопки мини-апки не будет")
     await dp.start_polling(bot)
 
 
