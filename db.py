@@ -30,6 +30,16 @@ _conn.executescript(
         ref_paid    INTEGER DEFAULT 0,
         notified    INTEGER DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS invoices (
+        id          TEXT PRIMARY KEY,
+        user_id     INTEGER,
+        plan        TEXT,
+        provider    TEXT,
+        amount      INTEGER,
+        currency    TEXT,
+        status      TEXT DEFAULT 'pending',
+        created_at  INTEGER
+    );
     CREATE TABLE IF NOT EXISTS payments (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     INTEGER,
@@ -102,6 +112,32 @@ def add_payment(uid: int, plan: str, amount: int, currency: str, charge_id: str)
     _conn.commit()
 
 
+def add_invoice(inv_id: str, uid: int, plan: str, provider: str, amount: int, currency: str):
+    _conn.execute(
+        "INSERT OR REPLACE INTO invoices (id, user_id, plan, provider, amount, currency, created_at) VALUES (?,?,?,?,?,?,?)",
+        (inv_id, uid, plan, provider, amount, currency, now()),
+    )
+    _conn.commit()
+
+
+def get_invoice(inv_id: str):
+    return _conn.execute("SELECT * FROM invoices WHERE id=?", (inv_id,)).fetchone()
+
+
+def pending_invoices(provider: str, max_age_sec: int):
+    return _conn.execute(
+        "SELECT * FROM invoices WHERE provider=? AND status='pending' AND created_at>?",
+        (provider, now() - max_age_sec),
+    ).fetchall()
+
+
+def set_invoice_status(inv_id: str, status: str) -> bool:
+    """Меняет статус только у pending-счёта. True — если поменяли (защита от двойного зачисления)."""
+    cur = _conn.execute("UPDATE invoices SET status=? WHERE id=? AND status='pending'", (status, inv_id))
+    _conn.commit()
+    return cur.rowcount > 0
+
+
 def payment_exists(charge_id: str) -> bool:
     return _conn.execute("SELECT 1 FROM payments WHERE charge_id=?", (charge_id,)).fetchone() is not None
 
@@ -127,6 +163,8 @@ def stats() -> dict:
         "stars": q("SELECT SUM(amount) FROM payments WHERE refunded=0 AND currency='XTR'"),
         "stars_today": q("SELECT SUM(amount) FROM payments WHERE refunded=0 AND currency='XTR' AND created_at>?", day),
         "trials": q("SELECT COUNT(*) FROM users WHERE trial_used=1"),
+        "rub": q("SELECT SUM(amount) FROM payments WHERE refunded=0 AND currency='RUB'"),
+        "rub_today": q("SELECT SUM(amount) FROM payments WHERE refunded=0 AND currency='RUB' AND created_at>?", day),
     }
 
 

@@ -283,7 +283,8 @@ async function api(path, body){
 const DEMO = {
   id: Math.floor(100000000 + Math.random()*900000000), name: 'Гость', active: false, expires_at: 0, expires_text: '',
   days_left: 0, key: null, trial_available: true, trial_days: 1, devices: 3,
-  plans: [{key:'m1',name:'1 месяц',stars:129,days:30},{key:'m3',name:'3 месяца',stars:324,days:90},{key:'m12',name:'12 месяцев',stars:1039,days:365}],
+  plans: [{key:'m1',name:'1 месяц',stars:129,rub:195,days:30},{key:'m3',name:'3 месяца',stars:324,rub:495,days:90},{key:'m12',name:'12 месяцев',stars:1039,rub:1560,days:365}],
+  methods: ['stars','crypto','card'],
   servers: [{name:'🇫🇷 Франция',protocol:'VLESS Reality'}],
   ref_link: 'https://t.me/klyxvpn_bot?start=ref0', ref_bonus: 7, invited: 0, bonus_days: 0, support: '', bot: 'klyxvpn_bot',
 };
@@ -333,13 +334,14 @@ function render(){
   $('#bonusDays').textContent = S.bonus_days;
 }
 
-const unit = {stars:' ⭐', card:' ₽', crypto:' USDT'};
+const unit = {stars:' ⭐', card:' ₽', crypto:' ₽'};
 const notes = {
   stars: 'Оплата прямо в Telegram — ключ придёт сразу',
-  card: LIVE ? 'Оплата картой скоро появится — пока доступны Stars' : 'Visa · Mastercard · Мир — на защищённой странице сайта',
-  crypto: LIVE ? 'Оплата криптой скоро появится — пока доступны Stars' : 'USDT · TON · BTC — ключ сразу после подтверждения сети',
+  card: 'Картой любого банка РФ через ЮMoney — ключ придёт сразу',
+  crypto: 'USDT · TON · BTC через @CryptoBot по курсу — ключ придёт сразу',
 };
-function priceOf(p, m){ return m==='stars' ? p.stars : m==='card' ? rubOf(p.stars) : usdtOf(p.stars); }
+const hasMethod = m => !S.methods || S.methods.includes(m);
+function priceOf(p, m){ return m==='stars' ? p.stars : (p.rub || rubOf(p.stars)); }
 
 function renderPlans(){
   const base = S.plans[0];
@@ -347,10 +349,10 @@ function renderPlans(){
   $('#planList').innerHTML = S.plans.map((p,i) => {
     const months = p.days/30, perStars = p.stars/months;
     const save = Math.round((1 - perStars/basePer)*100);
-    const v = priceOf(p, method), per = method==='crypto' ? Math.round(v/months*10)/10 : Math.round(v/months);
+    const v = priceOf(p, method), per = Math.round(v/months);
     const hit = p.key==='m3' && save>0 ? `<span class="hit">ВЫГОДНО −${save}%</span>` : '';
     const sub = i===0 ? 'Попробовать' : `${fmtNum(per)}${unit[method]} / мес`;
-    const alt = method==='stars' ? '≈ '+fmtNum(rubOf(p.stars))+' ₽' : 'разовый платёж';
+    const alt = method==='stars' ? '≈ '+fmtNum(p.rub || rubOf(p.stars))+' ₽' : method==='crypto' ? 'в USDT / TON / BTC' : 'разовый платёж';
     return `<div class="card plan ${p.key===planKey?'sel':''}" data-key="${p.key}">${hit}
       <div class="row"><div><b>${p.name}</b><div class="per">${sub}</div></div>
       <div style="text-align:right"><div class="price">${fmtNum(v)}${unit[method]}</div><div class="per">${alt}</div></div></div></div>`;
@@ -360,7 +362,11 @@ function renderPlans(){
   const p = S.plans.find(x => x.key===planKey) || S.plans[0];
   const label = {stars:'Оплатить ', card:'Оплатить картой ', crypto:'Оплатить криптой '}[method];
   $('#payBtn').textContent = label + fmtNum(priceOf(p, method)) + unit[method];
-  $('#payBtn').disabled = LIVE && method !== 'stars';
+  $('#payBtn').disabled = !hasMethod(method);
+  // показываем только доступные способы оплаты
+  const tabs = document.querySelectorAll('#payTabs .tab');
+  tabs.forEach(t => t.style.display = hasMethod(t.dataset.m) ? '' : 'none');
+  $('#payTabs').style.display = (S.methods && S.methods.length < 2) ? 'none' : '';
 }
 
 // ---------- навигация ----------
@@ -392,10 +398,10 @@ $('#openServers').onclick = openSheet;
 $('#overlay').onclick = () => { closeSheet(); closePay(); };
 
 // ---------- оплата ----------
-async function refreshUntilPaid(prevExp){
+async function refreshUntilPaid(prevExp, tries=12, every=1500){
   loading(true);
-  for (let i=0; i<12; i++){
-    await new Promise(r => setTimeout(r, 1500));
+  for (let i=0; i<tries; i++){
+    await new Promise(r => setTimeout(r, every));
     try { const me = await api('/api/me'); if (me.active && me.expires_at > prevExp){ S = me; render(); loading(false); toast('Оплачено! Ключ готов 🎉'); go('keyScr'); return; } } catch(e){}
   }
   loading(false); toast('Оплата прошла — ключ придёт в бот');
@@ -419,16 +425,22 @@ $('#payBtn').onclick = async () => {
       <div class="sum"><span>Тариф</span><b>${p.name}</b></div><div class="sum"><span>К оплате</span><b>${fmtNum(priceOf(p,method))}${unit[method]}</b></div>
       <button class="btn" id="demoPay" style="margin-top:14px">Оплатить (демо)</button>`) || ($('#demoPay').onclick = demoActivate);
   }
-  if (method !== 'stars') return toast('Скоро! Пока можно оплатить звёздами');
+  if (!hasMethod(method)) return toast('Этот способ пока недоступен');
   try {
     loading(true);
-    const { link } = await api('/api/invoice', { plan: planKey });
+    const { link } = await api('/api/invoice', { plan: planKey, method });
     loading(false);
     const prevExp = S.expires_at || 0;
-    tg.openInvoice(link, status => {
-      if (status === 'paid') refreshUntilPaid(prevExp);
-      else if (status === 'failed') toast('Оплата не прошла');
-    });
+    if (method === 'stars') {
+      tg.openInvoice(link, status => {
+        if (status === 'paid') refreshUntilPaid(prevExp);
+        else if (status === 'failed') toast('Оплата не прошла');
+      });
+    } else {
+      if (method === 'crypto' && /^https:\/\/t\.me\//.test(link)) tg.openTelegramLink(link); else tg.openLink(link);
+      toast('Оплати во вкладке — ключ придёт в бот автоматически');
+      setTimeout(() => refreshUntilPaid(prevExp, 60, 5000), 3000);
+    }
   } catch(e) { loading(false); toast('Не получилось создать счёт: ' + e.message); }
 };
 
