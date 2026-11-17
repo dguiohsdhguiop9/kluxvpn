@@ -121,6 +121,11 @@
   .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:rot .8s linear infinite;margin:18px auto}
   @keyframes rot{to{transform:rotate(360deg)}}
   .btn+.btn{margin-top:8px}
+  .trial{border-color:rgba(255,122,26,.45);background:linear-gradient(135deg,rgba(255,122,26,.14),rgba(255,69,0,.04))}
+  .mini-btn{border:none;border-radius:12px;padding:10px 16px;font:800 14px Manrope,sans-serif;color:#0a0a0a;cursor:pointer;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  .btn:disabled{opacity:.5;cursor:default}
+  .loading{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:50;transition:opacity .3s}
+  .loading.hide{opacity:0;pointer-events:none}
 </style>
 </head>
 <body>
@@ -133,25 +138,32 @@
   <!-- HOME -->
   <section class="screen active" id="home">
     <div class="power-wrap">
-      <button class="power" id="power" aria-label="Подключить">
+      <button class="power" id="power" aria-label="Подписка">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
       </button>
-      <div class="status" id="status">Не подключено</div>
-      <div class="timer" id="timer">Нажми, чтобы подключиться</div>
+      <div class="status" id="status">Нет подписки</div>
+      <div class="timer" id="timer">Нажми, чтобы выбрать тариф</div>
+    </div>
+
+    <div class="card trial" id="trialCard" style="display:none">
+      <div class="row">
+        <div><b>🎁 Попробуй бесплатно</b><div class="srv-sub" id="trialSub">1 день без оплаты</div></div>
+        <button class="mini-btn" id="trialBtn">Забрать</button>
+      </div>
     </div>
 
     <div class="card server row" id="openServers">
       <div class="row" style="gap:12px">
-        <span class="flag" id="srvFlag">🇳🇱</span>
-        <div><div class="srv-name" id="srvName">Нидерланды</div><div class="srv-sub" id="srvSub">Амстердам · VLESS Reality</div></div>
+        <span class="flag" id="srvFlag">🇫🇷</span>
+        <div><div class="srv-name" id="srvName">Франция</div><div class="srv-sub" id="srvSub">VLESS Reality</div></div>
       </div>
       <span class="chev">›</span>
     </div>
 
     <div class="stats">
-      <div class="stat"><b id="ping">—</b><span>Пинг</span></div>
-      <div class="stat"><b id="down">0.0</b><span>↓ Мбит/с</span></div>
-      <div class="stat"><b id="up">0.0</b><span>↑ Мбит/с</span></div>
+      <div class="stat"><b id="stDays">—</b><span>Дней осталось</span></div>
+      <div class="stat"><b id="stDev">3</b><span>Устройства</span></div>
+      <div class="stat"><b>∞</b><span>Трафик</span></div>
     </div>
   </section>
 
@@ -166,23 +178,14 @@
       <div class="tab" data-m="crypto">₿ Крипта</div>
     </div>
 
-    <div class="card plan" data-plan="1" data-stars="129" data-rub="195" data-usdt="2.5" data-label="1 месяц">
-      <div class="row"><div><b>1 месяц</b><div class="per">Попробовать</div></div><div style="text-align:right"><div class="price"></div><div class="per alt"></div></div></div>
-    </div>
-    <div class="card plan sel" data-plan="3" data-stars="324" data-rub="495" data-usdt="6" data-label="3 месяца">
-      <span class="hit">ВЫГОДНО −16%</span>
-      <div class="row"><div><b>3 месяца</b><div class="per pm"></div></div><div style="text-align:right"><div class="price"></div><div class="per alt"></div></div></div>
-    </div>
-    <div class="card plan" data-plan="12" data-stars="1039" data-rub="1560" data-usdt="19" data-label="12 месяцев">
-      <div class="row"><div><b>12 месяцев</b><div class="per pm"></div></div><div style="text-align:right"><div class="price"></div><div class="per alt"></div></div></div>
-    </div>
+    <div id="planList"></div>
 
     <div class="card">
       <ul class="feat">
         <li>Безлимитный трафик</li>
-        <li>До 3 устройств на один ключ</li>
+        <li id="featDev">До 3 устройств на один ключ</li>
         <li>VLESS Reality — работает там, где другие блокируют</li>
-        <li>Смена страны в один тап</li>
+        <li>Ключ приходит сразу после оплаты</li>
       </ul>
     </div>
     <div class="srv-sub" id="payNote" style="text-align:center;margin:0 0 12px"></div>
@@ -221,15 +224,16 @@
       <div class="srv-sub" id="subLeft">Оформи тариф во вкладке «Тарифы»</div>
     </div>
     <div class="card">
-      <b>Приведи друга — получи 7 дней</b>
-      <div class="srv-sub" style="margin-top:4px">Друг тоже получает 3 дня бесплатно</div>
-      <div class="ref"><input id="refLink" readonly value="t.me/klyxvpn_bot?start=ref000000"><button id="copyRef">Копировать</button></div>
+      <b id="refTitle">Приведи друга — получи 7 дней</b>
+      <div class="srv-sub" style="margin-top:4px">Бонус начислится, когда друг оплатит подписку</div>
+      <div class="ref"><input id="refLink" readonly value=""><button id="copyRef">Копировать</button></div>
+      <button class="btn ghost" id="shareRef" style="margin-top:10px">📤 Поделиться ссылкой</button>
     </div>
     <div class="card">
-      <div class="row" style="padding:4px 0"><span>Приглашено друзей</span><b>0</b></div>
-      <div class="row" style="padding:4px 0"><span>Бонусных дней</span><b>0</b></div>
+      <div class="row" style="padding:4px 0"><span>Приглашено друзей</span><b id="invited">0</b></div>
+      <div class="row" style="padding:4px 0"><span>Бонусных дней</span><b id="bonusDays">0</b></div>
     </div>
-    <button class="btn ghost" id="support">Поддержка</button>
+    <button class="btn ghost" id="support">🆘 Поддержка</button>
   </section>
 </div>
 
@@ -248,191 +252,236 @@
 </div>
 <div class="sheet" id="paySheet"><div class="grab"></div><div id="payBody"></div></div>
 <div class="toast" id="toast"></div>
+<div class="loading hide" id="loading"><div class="spin"></div></div>
 
 <script>
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#000000'); tg.setBackgroundColor('#000000'); } catch(e){} }
 
+// Адрес API бота бот сам подставляет в ссылку мини-апки (?api=...)
+const API = (new URLSearchParams(location.search).get('api') || '').replace(/\/$/, '');
+const LIVE = !!(API && tg && tg.initData);
+
 const $ = s => document.querySelector(s);
-const toast = t => { const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),1800); };
+const toast = t => { const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),2200); };
 const haptic = (t='light') => { try{ tg && tg.HapticFeedback.impactOccurred(t) }catch(e){} };
+const fmtNum = n => Number(n).toLocaleString('ru-RU');
+const loading = on => $('#loading').classList.toggle('hide', !on);
 
-// user
-const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-const user = u ? {name:[u.first_name,u.last_name].filter(Boolean).join(' '), id:u.id} : {name:'Гость', id:Math.floor(100000+Math.random()*900000)};
-$('#uname').textContent = user.name; $('#uid').textContent = 'ID: '+user.id; $('#ava').textContent = user.name[0].toUpperCase();
-$('#refLink').value = 't.me/klyxvpn_bot?start=ref'+user.id;
+async function api(path, body){
+  const r = await fetch(API + path, {
+    method: body ? 'POST' : 'GET',
+    headers: {'Content-Type':'application/json', 'X-Init-Data': tg.initData},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
 
-// nav
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); $('#'+b.dataset.go).classList.add('active');
+// ---------- состояние ----------
+const DEMO = {
+  id: Math.floor(100000000 + Math.random()*900000000), name: 'Гость', active: false, expires_at: 0, expires_text: '',
+  days_left: 0, key: null, trial_available: true, trial_days: 1, devices: 3,
+  plans: [{key:'m1',name:'1 месяц',stars:129,days:30},{key:'m3',name:'3 месяца',stars:324,days:90},{key:'m12',name:'12 месяцев',stars:1039,days:365}],
+  servers: [{name:'🇫🇷 Франция',protocol:'VLESS Reality'}],
+  ref_link: 'https://t.me/klyxvpn_bot?start=ref0', ref_bonus: 7, invited: 0, bonus_days: 0, support: '', bot: 'klyxvpn_bot',
+};
+let S = DEMO;
+let method = 'stars', planKey = 'm3', curServer = 0;
+
+const rubOf = stars => Math.round(stars * 1.51 / 5) * 5;
+const usdtOf = stars => Math.round(stars * 0.0193 * 10) / 10;
+
+// ---------- отрисовка ----------
+function splitFlag(name){ const m = name.match(/^(\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}]{2})\s*(.*)$/u); return m ? [m[1], m[2]] : ['🌍', name]; }
+
+function render(){
+  const a = S.active;
+  $('#subBadge').textContent = a ? 'Активна' : 'Нет подписки';
+  $('#subBadge').classList.toggle('on', a);
+  $('#power').classList.toggle('on', a);
+  $('#status').textContent = a ? 'Подписка активна' : 'Нет подписки';
+  $('#timer').textContent = a ? `до ${S.expires_text} · осталось ${S.days_left} дн.` : 'Нажми, чтобы выбрать тариф';
+
+  $('#trialCard').style.display = S.trial_available ? '' : 'none';
+  $('#trialSub').textContent = `${S.trial_days} ${S.trial_days === 1 ? 'день' : 'дн.'} без оплаты — ключ сразу`;
+
+  const [flag, sname] = splitFlag(S.servers[curServer].name);
+  $('#srvFlag').textContent = flag; $('#srvName').textContent = sname; $('#srvSub').textContent = S.servers[curServer].protocol;
+
+  $('#stDays').textContent = a ? S.days_left : '—';
+  $('#stDev').textContent = S.devices;
+  $('#featDev').textContent = `До ${S.devices} устройств на один ключ`;
+
+  renderPlans();
+
+  $('#keyBadge').textContent = a ? 'Активен' : 'Неактивен';
+  $('#keyBadge').classList.toggle('on', a);
+  $('#keyText').textContent = a ? (S.key || 'Ключ готовится — обнови через минуту') : 'Купи тариф или возьми пробный период, чтобы получить ключ';
+
+  $('#uname').textContent = S.name || 'Пользователь';
+  $('#uid').textContent = 'ID: ' + S.id;
+  $('#ava').textContent = (S.name || 'U')[0].toUpperCase();
+  $('#profBadge').textContent = a ? 'Активна' : 'Нет';
+  $('#profBadge').classList.toggle('on', a);
+  $('#subBar').style.width = a ? Math.min(100, S.days_left / 30 * 100) + '%' : '0';
+  $('#subLeft').textContent = a ? `Действует до ${S.expires_text}` : 'Оформи тариф во вкладке «Тарифы»';
+  $('#refTitle').textContent = `Приведи друга — получи ${S.ref_bonus} дней`;
+  $('#refLink').value = S.ref_link;
+  $('#invited').textContent = S.invited;
+  $('#bonusDays').textContent = S.bonus_days;
+}
+
+const unit = {stars:' ⭐', card:' ₽', crypto:' USDT'};
+const notes = {
+  stars: 'Оплата прямо в Telegram — ключ придёт сразу',
+  card: LIVE ? 'Оплата картой скоро появится — пока доступны Stars' : 'Visa · Mastercard · Мир — на защищённой странице сайта',
+  crypto: LIVE ? 'Оплата криптой скоро появится — пока доступны Stars' : 'USDT · TON · BTC — ключ сразу после подтверждения сети',
+};
+function priceOf(p, m){ return m==='stars' ? p.stars : m==='card' ? rubOf(p.stars) : usdtOf(p.stars); }
+
+function renderPlans(){
+  const base = S.plans[0];
+  const basePer = base.stars / (base.days/30);
+  $('#planList').innerHTML = S.plans.map((p,i) => {
+    const months = p.days/30, perStars = p.stars/months;
+    const save = Math.round((1 - perStars/basePer)*100);
+    const v = priceOf(p, method), per = method==='crypto' ? Math.round(v/months*10)/10 : Math.round(v/months);
+    const hit = p.key==='m3' && save>0 ? `<span class="hit">ВЫГОДНО −${save}%</span>` : '';
+    const sub = i===0 ? 'Попробовать' : `${fmtNum(per)}${unit[method]} / мес`;
+    const alt = method==='stars' ? '≈ '+fmtNum(rubOf(p.stars))+' ₽' : 'разовый платёж';
+    return `<div class="card plan ${p.key===planKey?'sel':''}" data-key="${p.key}">${hit}
+      <div class="row"><div><b>${p.name}</b><div class="per">${sub}</div></div>
+      <div style="text-align:right"><div class="price">${fmtNum(v)}${unit[method]}</div><div class="per">${alt}</div></div></div></div>`;
+  }).join('');
+  document.querySelectorAll('.plan').forEach(el => el.onclick = () => { planKey = el.dataset.key; renderPlans(); haptic(); });
+  $('#payNote').textContent = notes[method];
+  const p = S.plans.find(x => x.key===planKey) || S.plans[0];
+  const label = {stars:'Оплатить ', card:'Оплатить картой ', crypto:'Оплатить криптой '}[method];
+  $('#payBtn').textContent = label + fmtNum(priceOf(p, method)) + unit[method];
+  $('#payBtn').disabled = LIVE && method !== 'stars';
+}
+
+// ---------- навигация ----------
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); $('#'+b.dataset.go).classList.add('active');
   haptic(); window.scrollTo(0,0);
 });
 const go = id => document.querySelector(`nav button[data-go="${id}"]`).click();
 
-// state
-let subscribed=false, connected=false, t0=0, tick=null;
-const servers=[
-  {f:'🇳🇱',n:'Нидерланды',c:'Амстердам',p:38},{f:'🇩🇪',n:'Германия',c:'Франкфурт',p:42},
-  {f:'🇫🇮',n:'Финляндия',c:'Хельсинки',p:31},{f:'🇵🇱',n:'Польша',c:'Варшава',p:27},
-  {f:'🇺🇸',n:'США',c:'Нью-Йорк',p:118},{f:'🇹🇷',n:'Турция',c:'Стамбул',p:64}];
-let cur=0;
+$('#power').onclick = () => { haptic('medium'); go(S.active ? 'keyScr' : 'plans'); };
 
-function renderServers(){
-  $('#srvList').innerHTML = servers.map((s,i)=>`<div class="srv-item ${i===cur?'sel':''}" data-i="${i}">
-    <span class="flag">${s.f}</span><div><div class="srv-name">${s.n}</div><div class="srv-sub">${s.c}</div></div>
-    <span class="ping ${s.p<70?'g':'y'}">${s.p} ms</span></div>`).join('');
-  document.querySelectorAll('.srv-item').forEach(el=>el.onclick=()=>{
-    cur=+el.dataset.i; const s=servers[cur];
-    $('#srvFlag').textContent=s.f; $('#srvName').textContent=s.n; $('#srvSub').textContent=s.c+' · VLESS Reality';
-    closeSheet(); haptic(); toast('Сервер: '+s.n);
-    if(connected){ $('#ping').textContent=s.p; }
-  });
-}
-const openSheet=()=>{renderServers();$('#overlay').style.display='block';requestAnimationFrame(()=>$('#sheet').classList.add('open'))};
-const closeSheet=()=>{$('#sheet').classList.remove('open');if(!$('#paySheet').classList.contains('open'))setTimeout(()=>$('#overlay').style.display='none',300)};
-$('#openServers').onclick=openSheet; $('#overlay').onclick=()=>{closeSheet();closePay();};
-
-// power
-const fmt = s => [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(n=>String(n).padStart(2,'0')).join(':');
-$('#power').onclick=()=>{
-  haptic('medium');
-  if(!subscribed){ toast('Сначала выбери тариф'); setTimeout(()=>go('plans'),500); return; }
-  const p=$('#power');
-  if(connected){
-    connected=false; clearInterval(tick); p.classList.remove('on');
-    $('#status').textContent='Не подключено'; $('#timer').textContent='Нажми, чтобы подключиться';
-    $('#ping').textContent='—'; $('#down').textContent='0.0'; $('#up').textContent='0.0'; return;
-  }
-  p.classList.add('connecting'); $('#status').textContent='Подключение…'; $('#timer').textContent=servers[cur].n;
-  setTimeout(()=>{
-    p.classList.remove('connecting'); p.classList.add('on'); connected=true; t0=Date.now();
-    $('#status').textContent='Защищено'; $('#ping').textContent=servers[cur].p;
-    tick=setInterval(()=>{
-      $('#timer').textContent=fmt(Math.floor((Date.now()-t0)/1000));
-      $('#down').textContent=(40+Math.random()*60).toFixed(1); $('#up').textContent=(15+Math.random()*25).toFixed(1);
-    },1000);
-  },1400);
-};
-
-// plans + payment methods
-// В боевой версии подставь свои значения:
-const CONFIG = { CARD_URL:'https://klyxvpn.net/pay', CRYPTOBOT_URL:'https://t.me/CryptoBot', API:'https://api.klyxvpn.net' };
-let method='stars';
-let plan=null;
-const fmtNum=n=>Number(n).toLocaleString('ru-RU');
-function priceOf(el,m){ const d=el.dataset; return m==='stars'?d.stars:m==='card'?d.rub:d.usdt; }
-const unit={stars:' ⭐',card:' ₽',crypto:' USDT'};
-const notes={stars:'Оплата прямо в Telegram',card:'Visa · Mastercard · Мир — на защищённой странице сайта',crypto:'USDT · TON · BTC — ключ сразу после подтверждения сети'};
-function renderPrices(){
-  document.querySelectorAll('.plan').forEach(el=>{
-    const v=priceOf(el,method), m=+el.dataset.plan;
-    el.querySelector('.price').textContent=fmtNum(v)+unit[method];
-    const per=Math.round(v/m*10)/10;
-    const pm=el.querySelector('.pm'); if(pm) pm.textContent=fmtNum(method==='crypto'?per:Math.round(per))+unit[method]+' / мес';
-    el.querySelector('.alt').textContent = method==='stars' ? '≈ '+fmtNum(el.dataset.rub)+' ₽' : method==='card' ? 'разовый платёж' : '≈ '+fmtNum(el.dataset.rub)+' ₽';
-  });
-  $('#payNote').textContent=notes[method];
-  const sel=document.querySelector('.plan.sel');
-  plan={m:+sel.dataset.plan,label:sel.dataset.label,el:sel};
-  const label={stars:'Оплатить ',card:'Оплатить картой ',crypto:'Оплатить криптой '}[method];
-  $('#payBtn').textContent=label+fmtNum(priceOf(sel,method))+unit[method];
-}
-document.querySelectorAll('.plan').forEach(el=>el.onclick=()=>{
-  document.querySelectorAll('.plan').forEach(x=>x.classList.remove('sel')); el.classList.add('sel'); renderPrices(); haptic();
+document.querySelectorAll('#payTabs .tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('#payTabs .tab').forEach(x => x.classList.remove('active')); t.classList.add('active');
+  method = t.dataset.m; renderPlans(); haptic();
 });
-document.querySelectorAll('#payTabs .tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('#payTabs .tab').forEach(x=>x.classList.remove('active')); t.classList.add('active');
-  method=t.dataset.m; renderPrices(); haptic();
-});
-renderPrices();
 
-function activate(){
-  subscribed=true; closePay();
-  const until=new Date(); until.setMonth(until.getMonth()+plan.m);
-  const d=until.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
-  $('#subBadge').textContent='Активна'; $('#subBadge').classList.add('on');
-  $('#keyBadge').textContent='Активен'; $('#keyBadge').classList.add('on');
-  $('#profBadge').textContent=plan.label; $('#profBadge').classList.add('on');
-  $('#subBar').style.width='100%'; $('#subLeft').textContent='Действует до '+d;
-  const uuid=crypto.randomUUID ? crypto.randomUUID() : 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-  $('#keyText').textContent=`vless://${uuid}@nl1.klyxvpn.net:443?type=tcp&security=reality&pbk=Xk3...&fp=chrome&sni=www.microsoft.com&sid=6ba8&flow=xtls-rprx-vision#KlyxVPN`;
-  toast('Оплачено! Ключ готов 🎉'); setTimeout(()=>go('keyScr'),700);
+// ---------- серверы ----------
+function openSheet(){
+  $('#srvList').innerHTML = S.servers.map((s,i) => { const [f,n] = splitFlag(s.name);
+    return `<div class="srv-item ${i===curServer?'sel':''}" data-i="${i}"><span class="flag">${f}</span><div><div class="srv-name">${n}</div><div class="srv-sub">${s.protocol}</div></div>${i===curServer?'<span class="ping g">✓</span>':''}</div>`; }).join('');
+  document.querySelectorAll('.srv-item').forEach(el => el.onclick = () => { curServer = +el.dataset.i; closeSheet(); render(); haptic(); });
+  $('#overlay').style.display='block'; requestAnimationFrame(()=>$('#sheet').classList.add('open'));
 }
-
-// sheets
+const closeSheet = () => { $('#sheet').classList.remove('open'); if(!$('#paySheet').classList.contains('open')) setTimeout(()=>$('#overlay').style.display='none',300); };
 function openPay(html){ $('#payBody').innerHTML=html; $('#overlay').style.display='block'; requestAnimationFrame(()=>$('#paySheet').classList.add('open')); }
 function closePay(){ $('#paySheet').classList.remove('open'); if(!$('#sheet').classList.contains('open')) setTimeout(()=>$('#overlay').style.display='none',300); }
-function waiting(text,ms){ $('#payBody').innerHTML=`<div class="spin"></div><p style="text-align:center;font-weight:700">${text}</p><p class="srv-sub" style="text-align:center;margin-top:6px">Не закрывай окно</p>`; setTimeout(activate,ms); }
-const summary=(price)=>`<div class="sum"><span>Тариф</span><b>${plan.label}</b></div><div class="sum"><span>Устройств</span><b>до 3</b></div><div class="sum"><span>К оплате</span><b>${price}</b></div>`;
+$('#openServers').onclick = openSheet;
+$('#overlay').onclick = () => { closeSheet(); closePay(); };
 
-function payCard(){
-  const price=fmtNum(plan.el.dataset.rub)+' ₽';
-  openPay(`<h2 style="font-size:19px">Оплата картой</h2>
-    <p class="srv-sub" style="margin:4px 0 10px">Откроется защищённая страница оплаты на нашем сайте</p>
-    ${summary(price)}
-    <div class="methods"><span>VISA</span><span>Mastercard</span><span>МИР</span><span>Apple Pay</span><span>Google Pay</span></div>
-    <button class="btn" id="goCard">Перейти к оплате ${price}</button>
-    <button class="btn ghost" id="cancelPay">Отмена</button>`);
-  $('#cancelPay').onclick=closePay;
-  $('#goCard').onclick=()=>{
-    haptic('medium');
-    const url=`${CONFIG.CARD_URL}?plan=${plan.m}&uid=${user.id}`;
-    // Боевой режим: открываем сайт оплаты, а после оплаты вебхук эквайера сообщает бэкенду, и бот выдаёт ключ
-    if(tg && tg.openLink && window.LIVE) { tg.openLink(url); waiting('Ожидаем подтверждение оплаты…',600000); }
-    else waiting('Ожидаем подтверждение оплаты…',1800);
-  };
+// ---------- оплата ----------
+async function refreshUntilPaid(prevExp){
+  loading(true);
+  for (let i=0; i<12; i++){
+    await new Promise(r => setTimeout(r, 1500));
+    try { const me = await api('/api/me'); if (me.active && me.expires_at > prevExp){ S = me; render(); loading(false); toast('Оплачено! Ключ готов 🎉'); go('keyScr'); return; } } catch(e){}
+  }
+  loading(false); toast('Оплата прошла — ключ придёт в бот');
 }
 
-const coins=[{id:'USDT',net:'TRC-20',addr:'TXq8...demoAddressUSDTtrc20...9kLm'},{id:'TON',net:'The Open Network',addr:'UQDemo...TONaddress...x7Qp'},{id:'BTC',net:'Bitcoin',addr:'bc1qdemo...btcaddress...4f2z'}];
-const rates={USDT:1,TON:0.32,BTC:0.0000105}; // демо-курсы: сколько монеты за 1 USDT, в бою брать с API
-function payCrypto(){
-  let c=0;
-  const draw=()=>{
-    const coin=coins[c], usdt=+plan.el.dataset.usdt, amt=coin.id==='USDT'?usdt:+(usdt*rates[coin.id]).toFixed(coin.id==='BTC'?7:2);
-    openPay(`<h2 style="font-size:19px">Оплата криптой</h2>
-      <div class="coins">${coins.map((x,i)=>`<div class="coin ${i===c?'sel':''}" data-i="${i}">${x.id}<small>${x.net}</small></div>`).join('')}</div>
-      ${summary(amt+' '+coin.id)}
-      <p class="srv-sub" style="margin-top:8px">Отправь ровно эту сумму на адрес (${coin.net}):</p>
-      <div class="addr" id="addr">${coin.addr}</div>
-      <button class="btn ghost" id="copyAddr">Скопировать адрес</button>
-      <button class="btn ghost" id="viaBot">Оплатить через @CryptoBot</button>
-      <button class="btn" id="paid">Я оплатил</button>`);
-    document.querySelectorAll('.coin').forEach(el=>el.onclick=()=>{c=+el.dataset.i; haptic(); draw();});
-    $('#copyAddr').onclick=()=>copy(coin.addr,'Адрес скопирован');
-    $('#viaBot').onclick=()=>{ haptic(); if(tg && tg.openTelegramLink && window.LIVE) tg.openTelegramLink(CONFIG.CRYPTOBOT_URL); else waiting('Создаём счёт в CryptoBot…',1800); };
-    $('#paid').onclick=()=>{ haptic('medium'); waiting('Проверяем транзакцию в сети…',2200); };
-  };
-  draw();
+function demoActivate(){
+  const p = S.plans.find(x => x.key===planKey);
+  const exp = new Date(Date.now() + p.days*86400000);
+  S = {...S, active:true, days_left:p.days, expires_text: exp.toLocaleDateString('ru-RU'), trial_available:false,
+    key:`vless://${crypto.randomUUID ? crypto.randomUUID() : 'demo'}@nl1.klyxvpn.net:443?type=tcp&security=reality&pbk=Xk3...&fp=chrome&sni=www.microsoft.com&flow=xtls-rprx-vision#KlyxVPN`};
+  render(); closePay(); toast('Демо: оплачено, ключ готов 🎉'); setTimeout(()=>go('keyScr'),600);
 }
 
-$('#payBtn').onclick=()=>{
+$('#payBtn').onclick = async () => {
   haptic('medium');
-  if(method==='card') return payCard();
-  if(method==='crypto') return payCrypto();
-  // Stars: бот создаёт инвойс (createInvoiceLink, currency XTR) и отдаёт ссылку сюда
-  if(tg && tg.openInvoice && window.INVOICE_URL){ tg.openInvoice(window.INVOICE_URL, st=>{ if(st==='paid') activate(); }); }
-  else { const t=$('#payBtn').textContent; $('#payBtn').textContent='Обработка…'; setTimeout(()=>{ activate(); $('#payBtn').textContent=t; },900); }
+  const p = S.plans.find(x => x.key===planKey);
+  if (!LIVE) {
+    if (method === 'stars') { $('#payBtn').textContent='Обработка…'; return setTimeout(demoActivate, 800); }
+    return openPay(`<h2 style="font-size:19px">${method==='card'?'Оплата картой':'Оплата криптой'}</h2>
+      <p class="srv-sub" style="margin:6px 0 14px">Демо-режим: в боте этот способ появится позже</p>
+      <div class="sum"><span>Тариф</span><b>${p.name}</b></div><div class="sum"><span>К оплате</span><b>${fmtNum(priceOf(p,method))}${unit[method]}</b></div>
+      <button class="btn" id="demoPay" style="margin-top:14px">Оплатить (демо)</button>`) || ($('#demoPay').onclick = demoActivate);
+  }
+  if (method !== 'stars') return toast('Скоро! Пока можно оплатить звёздами');
+  try {
+    loading(true);
+    const { link } = await api('/api/invoice', { plan: planKey });
+    loading(false);
+    const prevExp = S.expires_at || 0;
+    tg.openInvoice(link, status => {
+      if (status === 'paid') refreshUntilPaid(prevExp);
+      else if (status === 'failed') toast('Оплата не прошла');
+    });
+  } catch(e) { loading(false); toast('Не получилось создать счёт: ' + e.message); }
 };
 
-// copy
-async function copy(text,msg){ try{ await navigator.clipboard.writeText(text); toast(msg);}catch(e){ toast('Выдели и скопируй вручную'); } haptic(); }
-$('#copyKey').onclick=()=> subscribed ? copy($('#keyText').textContent,'Ключ скопирован') : (toast('Сначала оплати тариф'), setTimeout(()=>go('plans'),500));
-$('#copyRef').onclick=()=>copy('https://'+$('#refLink').value,'Ссылка скопирована');
-$('#support').onclick=()=>{ if(tg && tg.openTelegramLink){ tg.openTelegramLink('https://t.me/klyx_support'); } else toast('Откроется чат поддержки'); };
+$('#trialBtn').onclick = async () => {
+  haptic('medium');
+  if (!LIVE) { planKey='m1'; S = {...S, plans:S.plans}; const d=S.trial_days; S={...S, active:true, days_left:d, expires_text:new Date(Date.now()+d*86400000).toLocaleDateString('ru-RU'), trial_available:false, key:'vless://demo-trial@nl1.klyxvpn.net:443?security=reality#KlyxVPN'}; render(); toast('Демо: пробный период активирован'); return go('keyScr'); }
+  try { loading(true); S = await api('/api/trial', {}); render(); loading(false); toast('🎁 Пробный период активирован!'); go('keyScr'); }
+  catch(e){ loading(false); toast('Не получилось: ' + e.message); }
+};
 
-// instructions
-const guides={
-  ios:['Установи <b>V2Box</b> или <b>Streisand</b> из App Store','Скопируй ключ выше','В приложении нажми «+» → «Импорт из буфера»','Включи VPN и разреши добавить конфигурацию'],
-  android:['Установи <b>v2rayNG</b> или <b>Hiddify</b> из Google Play','Скопируй ключ выше','Нажми «+» → «Импорт из буфера обмена»','Нажми кнопку подключения внизу'],
-  pc:['Скачай <b>Hiddify</b> (Windows / macOS / Linux)','Скопируй ключ выше','Нажми «Новый профиль» → «Добавить из буфера»','Нажми «Подключиться»']};
-function renderSteps(os){ $('#steps').innerHTML=guides[os].map(s=>`<li>${s}</li>`).join(''); }
-document.querySelectorAll('#osTabs .tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('#osTabs .tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); renderSteps(t.dataset.os); haptic();
+// ---------- ключ, рефералка, поддержка ----------
+async function copy(text, msg){
+  try { await navigator.clipboard.writeText(text); toast(msg); }
+  catch(e){ const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy'); toast(msg);}catch(_){toast('Выдели и скопируй вручную');} ta.remove(); }
+  haptic();
+}
+$('#copyKey').onclick = () => S.active && S.key ? copy(S.key, 'Ключ скопирован — вставь его в приложение') : (toast('Сначала оформи подписку'), setTimeout(()=>go('plans'),500));
+$('#copyRef').onclick = () => copy(S.ref_link, 'Ссылка скопирована');
+$('#shareRef').onclick = () => {
+  const url = 'https://t.me/share/url?url=' + encodeURIComponent(S.ref_link) + '&text=' + encodeURIComponent('Быстрый VPN, которым пользуюсь сам 👇');
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else copy(S.ref_link, 'Ссылка скопирована');
+};
+$('#support').onclick = () => {
+  if (S.support && tg && tg.openTelegramLink) tg.openTelegramLink('https://t.me/' + S.support);
+  else if (S.bot && tg && tg.openTelegramLink) tg.openTelegramLink('https://t.me/' + S.bot);
+  else toast('Напиши в поддержку через бота');
+};
+
+const guides = {
+  ios: ['Установи <b>v2RayTun</b> или <b>Streisand</b> из App Store','Скопируй ключ выше','В приложении нажми «+» → «Добавить из буфера»','Включи VPN и разреши добавить конфигурацию'],
+  android: ['Установи <b>v2rayNG</b> или <b>Hiddify</b> из Google Play','Скопируй ключ выше','Нажми «+» → «Импорт из буфера обмена»','Нажми кнопку подключения'],
+  pc: ['Скачай <b>Hiddify</b> с сайта hiddify.com (Windows / macOS)','Скопируй ключ выше','«Новый профиль» → «Добавить из буфера»','Нажми «Подключиться»'],
+};
+function renderSteps(os){ $('#steps').innerHTML = guides[os].map(s => `<li>${s}</li>`).join(''); }
+document.querySelectorAll('#osTabs .tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('#osTabs .tab').forEach(x => x.classList.remove('active')); t.classList.add('active'); renderSteps(t.dataset.os); haptic();
 });
-renderSteps(/android/i.test(navigator.userAgent)?'android':/win|mac|linux/i.test(navigator.platform)&&!/iphone|ipad/i.test(navigator.userAgent)?'pc':'ios');
-if(/android/i.test(navigator.userAgent)) document.querySelector('[data-os="android"]').click();
+const ua = navigator.userAgent;
+const os0 = /android/i.test(ua) ? 'android' : /iphone|ipad|ipod/i.test(ua) ? 'ios' : 'pc';
+document.querySelector(`#osTabs [data-os="${os0}"]`).click();
+
+// ---------- старт ----------
+(async () => {
+  if (!LIVE) {
+    const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (u) S = {...S, id:u.id, name:[u.first_name,u.last_name].filter(Boolean).join(' ')};
+    render(); return;
+  }
+  loading(true);
+  try { S = await api('/api/me'); }
+  catch(e){ toast('Не удалось загрузить данные: ' + e.message); }
+  render(); loading(false);
+})();
 </script>
 </body>
 </html>
