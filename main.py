@@ -66,6 +66,7 @@ xui = XUI(
     env("XUI_PASSWORD"),
     int(env("XUI_INBOUND_ID", "1")),
     env("SERVER_HOST"),
+    env("XUI_TOKEN"),  # API-токен панели (3X-UI 3.x), можно вместо логина/пароля
 )
 
 if not BOT_TOKEN:
@@ -163,7 +164,7 @@ async def key_for(u) -> str | None:
     if not (u and u["uuid"] and xui.configured):
         return None
     try:
-        return await xui.link(u["uuid"], f"KlyxVPN {SERVER_NAME}")
+        return await xui.link(u["uuid"], u["id"], f"KlyxVPN {SERVER_NAME}")
     except Exception as e:
         log.error("Не удалось собрать ключ: %s", e)
         return None
@@ -626,7 +627,7 @@ async def adm_pays(call: CallbackQuery):
 async def adm_srv(call: CallbackQuery):
     await call.answer("Проверяю…")
     if not xui.configured:
-        return await call.message.answer("❌ Панель не настроена: добавь XUI_URL, XUI_USERNAME, XUI_PASSWORD в Railway")
+        return await call.message.answer("❌ Панель не настроена: добавь XUI_URL, XUI_USERNAME, XUI_PASSWORD (или XUI_TOKEN) в Railway")
     try:
         await call.message.answer(await xui.ping())
     except Exception as e:
