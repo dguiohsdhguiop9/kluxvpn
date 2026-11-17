@@ -30,6 +30,10 @@ _conn.executescript(
         ref_paid    INTEGER DEFAULT 0,
         notified    INTEGER DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    );
     CREATE TABLE IF NOT EXISTS invoices (
         id          TEXT PRIMARY KEY,
         user_id     INTEGER,
@@ -190,3 +194,13 @@ def expiring_soon(within_sec: int):
 
 def is_persistent() -> bool:
     return DB_PATH != "klyx.db"
+
+
+def get_setting(key: str, default: str = "") -> str:
+    r = _conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r[0] if r else default
+
+
+def set_setting(key: str, value: str):
+    _conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
+    _conn.commit()

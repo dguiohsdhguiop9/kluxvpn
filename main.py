@@ -31,6 +31,7 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InputMediaPhoto,
+    InputSticker,
     InlineKeyboardMarkup,
     LabeledPrice,
     MenuButtonWebApp,
@@ -90,7 +91,7 @@ PLANS = {
 # Цены в рублях (для карты и крипты — крипта считается по курсу от рублёвой цены)
 RUB_PRICES = {"m1": 195, "m3": 495, "m12": 1560}
 
-METHOD_NAMES = {"stars": "⭐ Telegram Stars", "crypto": "💎 Криптовалюта", "card": "💳 Картой (рубли)"}
+METHOD_NAMES = {"stars": "⭐ Telegram Stars", "crypto": "🪙 Криптовалюта", "card": "💳 Картой (рубли)"}
 
 
 def methods() -> list[str]:
@@ -238,14 +239,14 @@ async def make_invoice_link(plan_key: str, uid: int) -> str:
 # ---------------- тексты и клавиатуры ----------------
 def home_text(u) -> str:
     if is_active(u):
-        status = f"🟢 Подписка активна до <b>{fmt_date(u['expires_at'])}</b> (осталось {days_left(u)} дн.)"
+        status = f"🟠 Подписка активна до <b>{fmt_date(u['expires_at'])}</b> (осталось {days_left(u)} дн.)"
     else:
-        status = "⚪️ Подписки нет"
+        status = "⚫️ Подписки нет"
     return (
         "⚡️ <b>KlyxVPN</b> — быстрый и надёжный VPN\n\n"
-        "🔒 Протокол VLESS Reality — работает там, где другие блокируют\n"
-        f"♾ Безлимитный трафик · 📱 до {DEVICES} устройств\n"
-        f"🌍 Сервер: {SERVER_NAME}\n\n"
+        "🔸 Протокол VLESS Reality — работает там, где другие блокируют\n"
+        f"🔸 Безлимитный трафик · до {DEVICES} устройств\n"
+        f"🔸 Сервер: {SERVER_NAME}\n\n"
         f"{status}"
     )
 
@@ -253,17 +254,17 @@ def home_text(u) -> str:
 def home_kb(u) -> InlineKeyboardMarkup:
     rows = []
     if webapp_url():
-        rows.append([InlineKeyboardButton(text="🚀 Открыть приложение", web_app=WebAppInfo(url=webapp_url()))])
-    rows.append([InlineKeyboardButton(text="💎 Продлить подписку" if is_active(u) else "💎 Купить подписку", callback_data="buy")])
+        rows.append([InlineKeyboardButton(text="⚡️ Открыть приложение", web_app=WebAppInfo(url=webapp_url()))])
+    rows.append([InlineKeyboardButton(text="🔥 Продлить подписку" if is_active(u) else "🔥 Купить подписку", callback_data="buy")])
     rows.append([
         InlineKeyboardButton(text="🔑 Мой ключ", callback_data="key"),
-        InlineKeyboardButton(text="📲 Как подключить", callback_data="guide"),
+        InlineKeyboardButton(text="📱 Как подключить", callback_data="guide"),
     ])
     if TRIAL_DAYS and u and not u["trial_used"] and not is_active(u):
         rows.append([InlineKeyboardButton(text=f"🎁 Попробовать бесплатно ({TRIAL_DAYS} дн.)", callback_data="trial")])
     rows.append([
-        InlineKeyboardButton(text="👥 Пригласить друга", callback_data="ref"),
-        InlineKeyboardButton(text="🆘 Поддержка", callback_data="support"),
+        InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="ref"),
+        InlineKeyboardButton(text="💬 Поддержка", callback_data="support"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -273,7 +274,7 @@ def back_kb(*extra) -> InlineKeyboardMarkup:
 
 
 def plans_text() -> str:
-    lines = ["💎 <b>Выбери тариф</b>\n"]
+    lines = ["🔥 <b>Выбери тариф</b>\n"]
     base = PLANS["m1"][1]
     for key, (name, stars, days) in PLANS.items():
         months = days / 30
@@ -281,8 +282,8 @@ def plans_text() -> str:
         save = round((1 - per / base) * 100)
         extra = f" · выгода {save}%" if save > 0 else ""
         rub = f" / {RUB_PRICES[key]} ₽" if len(methods()) > 1 else ""
-        lines.append(f"• <b>{name}</b> — {stars} ⭐{rub} ({per} ⭐/мес{extra})")
-    lines.append(f"\n♾ Безлимит · 📱 до {DEVICES} устройств · 🌍 {SERVER_NAME}")
+        lines.append(f"🔸 <b>{name}</b> — {stars} ⭐{rub} ({per} ⭐/мес{extra})")
+    lines.append(f"\n🔸 Безлимит · до {DEVICES} устройств · {SERVER_NAME}")
     return "\n".join(lines)
 
 
@@ -295,7 +296,7 @@ def plans_kb() -> InlineKeyboardMarkup:
 
 
 GUIDES = {
-    "ios": ("🍏 iPhone / iPad", [
+    "ios": ("🍎 iPhone / iPad", [
         "Установи <b>v2RayTun</b> или <b>Streisand</b> из App Store",
         "В боте нажми «🔑 Мой ключ» и скопируй ключ",
         "В приложении нажми «+» → «Добавить из буфера»",
@@ -326,7 +327,7 @@ async def key_text(u) -> tuple[str, InlineKeyboardMarkup]:
     if not is_active(u):
         return (
             "🔑 У тебя пока нет активной подписки.\n\nКупи тариф или попробуй бесплатно — ключ придёт сразу.",
-            back_kb([InlineKeyboardButton(text="💎 Купить подписку", callback_data="buy")]),
+            back_kb([InlineKeyboardButton(text="🔥 Купить подписку", callback_data="buy")]),
         )
     link = await key_for(u)
     if not link:
@@ -337,9 +338,9 @@ async def key_text(u) -> tuple[str, InlineKeyboardMarkup]:
         )
     return (
         f"🔑 <b>Твой ключ</b> (нажми, чтобы скопировать):\n\n<code>{esc(link)}</code>\n\n"
-        f"📅 Действует до <b>{fmt_date(u['expires_at'])}</b> (осталось {days_left(u)} дн.)\n"
+        f"🗓 Действует до <b>{fmt_date(u['expires_at'])}</b> (осталось {days_left(u)} дн.)\n"
         f"📱 До {DEVICES} устройств · ⚠️ никому не передавай ключ",
-        back_kb([InlineKeyboardButton(text="📲 Как подключить", callback_data="guide")]),
+        back_kb([InlineKeyboardButton(text="📱 Как подключить", callback_data="guide")]),
     )
 
 
@@ -365,6 +366,7 @@ def _remember(screen: str, msg):
 async def show(target, screen: str, text: str, kb: InlineKeyboardMarkup | None = None):
     """Показывает экран: баннер + подпись + кнопки. На нажатие кнопки — меняет картинку в том же сообщении."""
     media = banner(screen)
+    kb = decorate(kb)
     msg_obj = target.message if isinstance(target, CallbackQuery) else target
     if media is None:  # нет картинки — обычный текст
         if isinstance(target, CallbackQuery):
@@ -397,11 +399,89 @@ async def show(target, screen: str, text: str, kb: InlineKeyboardMarkup | None =
 async def send_screen(uid: int, screen: str, text: str, kb: InlineKeyboardMarkup | None = None):
     """Отправить экран с баннером пользователю по ID (уведомления, ключи)."""
     media = banner(screen)
+    kb = decorate(kb)
     if media is None:
         return await main_bot.send_message(uid, text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
     res = await main_bot.send_photo(uid, media, caption=text, reply_markup=kb, parse_mode="HTML")
     _remember(screen, res)
     return res
+
+
+# ---------------- стикеры ----------------
+STICKERS = [("hello", "👋"), ("vpn_on", "🔒"), ("paid", "✅"), ("key", "🔑"), ("thanks", "❤️"),
+            ("cool", "😎"), ("renew", "⏳"), ("friends", "🤝"), ("support", "💬"), ("fire", "🔥")]
+_sticker_ids: dict[str, str] = {}
+
+
+def sticker_set_name() -> str:
+    return f"klyxvpn_by_{MAIN_USERNAME}"
+
+
+async def load_stickers():
+    try:
+        st = await main_bot.get_sticker_set(sticker_set_name())
+        for (name, _), s in zip(STICKERS, st.stickers):
+            _sticker_ids[name] = s.file_id
+        log.info("🦊 Стикерпак загружен: %s стикеров", len(_sticker_ids))
+    except Exception:
+        log.info("🦊 Стикерпака ещё нет — создай его командой /stickers в админке")
+
+
+async def send_sticker(uid: int, name: str):
+    if name in _sticker_ids:
+        try:
+            await main_bot.send_sticker(uid, _sticker_ids[name])
+        except Exception:
+            pass
+
+
+# ---------------- свои иконки на кнопках (custom emoji, нужен Telegram Premium у владельца бота) ----------------
+ICONS = ["fire", "key", "phone", "friends", "chat", "bolt", "gift", "star", "coin", "card", "hourglass",
+         "link", "chart", "money", "megaphone", "server", "back", "check", "rocket"]
+ICON_EMOJI = {"fire": "🔥", "key": "🔑", "phone": "📱", "friends": "🤝", "chat": "💬", "bolt": "⚡️", "gift": "🎁",
+              "star": "⭐️", "coin": "🪙", "card": "💳", "hourglass": "⏳", "link": "🔗", "chart": "📊", "money": "💰",
+              "megaphone": "📢", "server": "🖥", "back": "⬅️", "check": "✅", "rocket": "🚀"}
+# какой эмодзи в начале текста кнопки заменить на какую иконку
+EMOJI_TO_ICON = {"🔥": "fire", "🔑": "key", "📱": "phone", "🤝": "friends", "💬": "chat", "⚡️": "bolt", "⚡": "bolt",
+                 "🎁": "gift", "⭐": "star", "🪙": "coin", "💳": "card", "⏳": "hourglass", "🔗": "link", "📊": "chart",
+                 "💰": "money", "📢": "megaphone", "🖥": "server", "«": "back", "✅": "check", "🚀": "rocket"}
+_icon_ids: dict[str, str] = {}
+
+
+def icons_set_name() -> str:
+    return f"klyxicons2_by_{MAIN_USERNAME}"
+
+
+async def load_icons():
+    if db.get_setting("icons") != "1":
+        return
+    try:
+        st = await main_bot.get_sticker_set(icons_set_name())
+        for name, s in zip(ICONS, st.stickers):
+            if s.custom_emoji_id:
+                _icon_ids[name] = s.custom_emoji_id
+        log.info("🎨 Иконки кнопок включены: %s шт.", len(_icon_ids))
+    except Exception as e:
+        log.warning("Иконки кнопок не загрузились: %s", e)
+
+
+def decorate(kb: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
+    """Заменяет эмодзи в начале кнопок на свои оранжевые иконки (если они включены)."""
+    if not kb or not _icon_ids:
+        return kb
+    rows = []
+    for row in kb.inline_keyboard:
+        new_row = []
+        for b in row:
+            text = b.text
+            for emo, icon in EMOJI_TO_ICON.items():
+                if text.startswith(emo) and icon in _icon_ids and not b.icon_custom_emoji_id:
+                    rest = text[len(emo):].lstrip("\ufe0f").strip()
+                    b = b.model_copy(update={"text": rest or text, "icon_custom_emoji_id": _icon_ids[icon]})
+                    break
+            new_row.append(b)
+        rows.append(new_row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def edit_or_send(call: CallbackQuery, text: str, kb: InlineKeyboardMarkup, screen: str = "home"):
@@ -420,11 +500,13 @@ async def cmd_start(message: Message, command: CommandObject):
     if command.args and command.args.startswith("ref") and command.args[3:].isdigit():
         referrer = int(command.args[3:])
     u, is_new = ensure_user(message.from_user, referrer)
+    if is_new:
+        await send_sticker(message.from_user.id, "hello")
     if is_new and u["referrer"]:
         try:
             await main_bot.send_message(
                 u["referrer"],
-                f"👥 По твоей ссылке пришёл новый пользователь! Когда он оплатит подписку, ты получишь +{REF_BONUS_DAYS} дн.",
+                f"🤝 По твоей ссылке пришёл новый пользователь! Когда он оплатит подписку, ты получишь +{REF_BONUS_DAYS} дн.",
             )
         except Exception:
             pass
@@ -544,7 +626,7 @@ async def start_payment(call: CallbackQuery, method: str, key: str):
     }
     rows = [[InlineKeyboardButton(text=f"Оплатить {price}", url=link)]]
     if inv_id:
-        rows.append([InlineKeyboardButton(text="🔄 Я оплатил — проверить", callback_data=f"chk:{inv_id}")])
+        rows.append([InlineKeyboardButton(text="⏳ Я оплатил — проверить", callback_data=f"chk:{inv_id}")])
     rows.append([InlineKeyboardButton(text="« Другой способ", callback_data=f"plan:{key}")])
     await show(call, "pay",
                f"🧾 <b>{name}</b> — {price}\n{METHOD_NAMES[method]}\n\n{hints[method]}\nКлюч придёт сюда сразу после оплаты.",
@@ -581,7 +663,7 @@ async def cb_key(call: CallbackQuery):
 
 @main_r.callback_query(F.data == "guide")
 async def cb_guide(call: CallbackQuery):
-    await edit_or_send(call, "📲 <b>Как подключиться</b>\n\nВыбери своё устройство:", guide_kb(), "guide")
+    await edit_or_send(call, "📱 <b>Как подключиться</b>\n\nВыбери своё устройство:", guide_kb(), "guide")
     await call.answer()
 
 
@@ -607,6 +689,8 @@ async def cb_trial(call: CallbackQuery):
     ok, link = await add_days(u["id"], TRIAL_DAYS)
     u = db.get_user(u["id"])
     if ok and link:
+        await send_sticker(u["id"], "key")
+    if ok and link:
         text = (
             f"🎁 Пробный период на {TRIAL_DAYS} дн. активирован!\n\n"
             f"🔑 Твой ключ (нажми, чтобы скопировать):\n<code>{esc(link)}</code>\n\n"
@@ -614,20 +698,20 @@ async def cb_trial(call: CallbackQuery):
         )
     else:
         text = f"🎁 Пробный период активирован, но ключ ещё готовится. Загляни в «🔑 Мой ключ» через пару минут или {support_text()}."
-    await edit_or_send(call, text, back_kb([InlineKeyboardButton(text="📲 Как подключить", callback_data="guide")]), "trial")
+    await edit_or_send(call, text, back_kb([InlineKeyboardButton(text="📱 Как подключить", callback_data="guide")]), "trial")
 
 
 @main_r.callback_query(F.data == "ref")
 async def cb_ref(call: CallbackQuery):
     u, _ = ensure_user(call.from_user)
     text = (
-        "👥 <b>Приглашай друзей — получай дни бесплатно</b>\n\n"
+        "🤝 <b>Приглашай друзей — получай дни бесплатно</b>\n\n"
         f"За каждого друга, который оплатит подписку, ты получишь <b>+{REF_BONUS_DAYS} дн.</b>\n\n"
         f"Твоя ссылка:\n<code>{ref_link(u['id'])}</code>\n\n"
         f"Приглашено: <b>{db.count_invited(u['id'])}</b> · бонусных дней: <b>{u['bonus_days']}</b>"
     )
     share = f"https://t.me/share/url?url={quote(ref_link(u['id']))}&text={quote('Быстрый VPN, которым пользуюсь сам 👇')}"
-    await edit_or_send(call, text, back_kb([InlineKeyboardButton(text="📤 Поделиться", url=share)]), "ref")
+    await edit_or_send(call, text, back_kb([InlineKeyboardButton(text="🔗 Поделиться", url=share)]), "ref")
     await call.answer()
 
 
@@ -636,7 +720,7 @@ async def cb_support(call: CallbackQuery):
     await call.answer()
     await edit_or_send(
         call,
-        f"🆘 <b>Поддержка</b>\n\nПиши: {support_text()}\nОбычно отвечаем в течение пары часов.\n\n"
+        f"💬 <b>Поддержка</b>\n\nПиши: {support_text()}\nОбычно отвечаем в течение пары часов.\n\n"
         "Перед вопросом проверь:\n• подписка активна (🔑 Мой ключ)\n• ключ вставлен целиком\n• в приложении включён VPN",
         back_kb(),
         "support",
@@ -664,20 +748,21 @@ async def fulfill_payment(uid: int, key: str, amount: int, currency: str, charge
 
     if ok and link:
         text = (
-            f"✅ <b>Оплата прошла!</b> Тариф: {name}\n"
-            f"📅 Подписка до <b>{fmt_date(u['expires_at'])}</b>\n\n"
+            f"🔥 <b>Оплата прошла!</b> Тариф: {name}\n"
+            f"🗓 Подписка до <b>{fmt_date(u['expires_at'])}</b>\n\n"
             f"🔑 Твой ключ (нажми, чтобы скопировать):\n<code>{esc(link)}</code>\n\n"
             "Не знаешь, куда вставить? Жми «Как подключить» 👇"
         )
     else:
         text = (
-            f"✅ <b>Оплата прошла!</b> Подписка до <b>{fmt_date(u['expires_at'])}</b>.\n\n"
+            f"🔥 <b>Оплата прошла!</b> Подписка до <b>{fmt_date(u['expires_at'])}</b>.\n\n"
             f"Ключ готовится — он появится в «🔑 Мой ключ» через пару минут. Если нет — {support_text()}"
         )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📲 Как подключить", callback_data="guide")],
+        [InlineKeyboardButton(text="📱 Как подключить", callback_data="guide")],
         [InlineKeyboardButton(text="« В меню", callback_data="home")],
     ])
+    await send_sticker(uid, "paid")
     try:
         await send_screen(uid, "success", text, kb)
     except Exception as e:
@@ -688,6 +773,7 @@ async def fulfill_payment(uid: int, key: str, amount: int, currency: str, charge
         db.add_bonus_days(u["referrer"], REF_BONUS_DAYS)
         await add_days(u["referrer"], REF_BONUS_DAYS)
         try:
+            await send_sticker(u["referrer"], "friends")
             await main_bot.send_message(u["referrer"], f"🎉 Твой друг оплатил подписку — тебе +{REF_BONUS_DAYS} дн. KlyxVPN!")
         except Exception:
             pass
@@ -780,6 +866,8 @@ ADMIN_HELP = (
     "<code>/give ID ДНИ</code> — выдать/продлить подписку\n"
     "<code>/sync ID</code> — повторно отправить ключ в панель\n"
     "<code>/refund ID CHARGE_ID</code> — вернуть звёзды\n"
+    "<code>/stickers</code> — создать стикерпак KlyxVPN\n"
+    "<code>/icons</code> — включить свои иконки на кнопках (нужен Premium)\n"
     "<code>/logout</code> — выйти из админки"
 )
 
@@ -835,7 +923,7 @@ async def adm_stats(call: CallbackQuery):
     await call.message.answer(
         "📊 <b>Статистика</b>\n\n"
         f"👤 Пользователей: <b>{s['users']}</b> (+{s['users_today']} за сутки)\n"
-        f"🟢 Активных подписок: <b>{s['active']}</b>\n"
+        f"🟠 Активных подписок: <b>{s['active']}</b>\n"
         f"🎁 Взяли пробный: {s['trials']}\n"
         f"💰 Оплат: <b>{s['payments']}</b>\n"
         f"⭐ Звёзд всего: <b>{s['stars']}</b> (за сутки: {s['stars_today']})\n"
@@ -943,6 +1031,81 @@ async def adm_bc_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Рассылка завершена. Доставлено: {ok}, не доставлено: {fail}")
 
 
+@admin_r.message(Command("stickers"))
+async def cmd_stickers(message: Message):
+    name = sticker_set_name()
+    try:
+        await main_bot.get_sticker_set(name)
+        await load_stickers()
+        return await message.answer(f"🦊 Стикерпак уже есть: https://t.me/addstickers/{name}")
+    except Exception:
+        pass
+    files = [(n, e, os.path.join(BANNER_DIR, f"sticker_{n}.png")) for n, e in STICKERS]
+    missing = [n for n, _, f in files if not os.path.exists(f)]
+    if missing:
+        return await message.answer(f"❌ Не хватает файлов: {', '.join('sticker_' + m + '.png' for m in missing)}")
+    await message.answer("🦊 Создаю стикерпак…")
+    try:
+        await main_bot.create_new_sticker_set(
+            user_id=message.from_user.id,
+            name=name,
+            title="KlyxVPN 🦊",
+            stickers=[InputSticker(sticker=FSInputFile(f), format="static", emoji_list=[e]) for _, e, f in files],
+        )
+        await load_stickers()
+        await message.answer(f"✅ Готово! Добавляй: https://t.me/addstickers/{name}")
+        await send_sticker(message.from_user.id, "fire")
+    except Exception as e:
+        await message.answer(f"❌ Не получилось создать стикерпак: {esc(e)}", parse_mode="HTML")
+
+
+@admin_r.message(Command("icons"))
+async def cmd_icons(message: Message, command: CommandObject):
+    if (command.args or "").strip() == "off":
+        db.set_setting("icons", "0")
+        _icon_ids.clear()
+        return await message.answer("Иконки на кнопках выключены, вернулись обычные эмодзи.")
+    name = icons_set_name()
+    try:
+        await main_bot.get_sticker_set(name)
+    except Exception:
+        def icon_file(i):  # анимированная .webm, если есть, иначе статичная .png
+            for ext, fmt in (("webm", "video"), ("png", "static")):
+                f = os.path.join(BANNER_DIR, f"icon_{i}.{ext}")
+                if os.path.exists(f):
+                    return f, fmt
+            return None, None
+        missing = [i for i in ICONS if not icon_file(i)[0]]
+        if missing:
+            return await message.answer(f"❌ Не хватает файлов: {', '.join('icon_' + m + '.webm' for m in missing)}")
+        await message.answer("🎨 Создаю набор иконок…")
+        try:
+            await main_bot.create_new_sticker_set(
+                user_id=message.from_user.id, name=name, title="KlyxVPN icons",
+                sticker_type="custom_emoji",
+                stickers=[InputSticker(sticker=FSInputFile(icon_file(i)[0]), format=icon_file(i)[1],
+                                       emoji_list=[ICON_EMOJI[i]]) for i in ICONS],
+            )
+        except Exception as e:
+            return await message.answer(f"❌ Не получилось создать иконки: {esc(e)}", parse_mode="HTML")
+    db.set_setting("icons", "1")
+    await load_icons()
+    # проверяем, что Telegram разрешает иконки на кнопках (нужен Premium у владельца бота)
+    try:
+        await main_bot.send_message(message.chat.id, "🎨 Проверка иконок на кнопках:",
+                                    reply_markup=decorate(InlineKeyboardMarkup(inline_keyboard=[
+                                        [InlineKeyboardButton(text="🔥 Купить подписку", callback_data="buy")],
+                                        [InlineKeyboardButton(text="🔑 Мой ключ", callback_data="key"),
+                                         InlineKeyboardButton(text="💬 Поддержка", callback_data="support")]])))
+        await message.answer("✅ Если видишь оранжевые иконки на кнопках выше — всё работает! Выключить: /icons off")
+    except Exception as e:
+        db.set_setting("icons", "0")
+        _icon_ids.clear()
+        await message.answer(
+            "❌ Telegram не разрешил иконки на кнопках. Скорее всего, у владельца бота нет Telegram Premium.\n"
+            f"Ошибка: {esc(e)}\nКнопки остаются с обычными эмодзи.", parse_mode="HTML")
+
+
 @admin_r.message(Command("user"))
 async def cmd_user(message: Message, command: CommandObject):
     if not command.args or not command.args.strip().isdigit():
@@ -998,10 +1161,11 @@ async def reminders_loop():
             for u in db.expiring_soon(3 * 86400):
                 db.mark(u["id"], "notified")
                 try:
+                    await send_sticker(u["id"], "renew")
                     await send_screen(
                         u["id"], "plans",
                         f"⏳ Подписка KlyxVPN закончится <b>{fmt_date(u['expires_at'])}</b> (через {days_left(u)} дн.).\nПродли, чтобы VPN не отключился 👇",
-                        InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Продлить", callback_data="buy")]]),
+                        InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔥 Продлить", callback_data="buy")]]),
                     )
                 except Exception:
                     pass
@@ -1151,6 +1315,8 @@ async def main():
     log.info("🗄 База: %s%s", db.DB_PATH, "" if db.is_persistent() else "  ⚠️ НЕ на Volume — данные сотрутся при перезапуске!")
     log.info("🖥 Панель 3X-UI: %s", "настроена" if xui.configured else "НЕ настроена (ключи выдаваться не будут)")
     log.info("💳 Способы оплаты: %s", ", ".join(methods()))
+    await load_stickers()
+    await load_icons()
     log.info("🔐 Пароль админки: %s", "задан" if ADMIN_PASSWORD else "НЕ задан (добавь ADMIN_PASSWORD)")
     if yoomoney.enabled:
         log.info("📮 Адрес для уведомлений ЮMoney: %s/yoomoney", PUBLIC_URL or "(нужен PUBLIC_URL)")
