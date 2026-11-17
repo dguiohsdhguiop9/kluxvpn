@@ -139,7 +139,15 @@ class XUI:
         import aiohttp
 
         if self._session is None or self._session.closed:
-            headers = {"Accept": "application/json"}
+            u = urlparse(self.base)
+            origin = f"{u.scheme}://{u.netloc}"
+            headers = {
+                "Accept": "application/json",
+                "Origin": origin,
+                "Referer": self.base + "/",
+                "X-Requested-With": "XMLHttpRequest",
+                "User-Agent": "Mozilla/5.0 (KlyxVPN bot)",
+            }
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
             self._session = aiohttp.ClientSession(
@@ -159,7 +167,8 @@ class XUI:
         try:
             data = json.loads(text)
         except Exception:
-            raise PanelError(f"Панель не отвечает на /login (HTTP {r.status}). Проверь XUI_URL")
+            hint = " — панель запрещает вход со стороннего сервера, используй XUI_TOKEN" if r.status == 403 else " — проверь XUI_URL"
+            raise PanelError(f"Панель не пускает на /login (HTTP {r.status}){hint}")
         if not data.get("success"):
             raise PanelError(f"Не удалось войти в панель: {data.get('msg') or 'неверный логин или пароль'}")
         self._logged_in = True
