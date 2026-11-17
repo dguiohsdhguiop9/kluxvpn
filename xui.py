@@ -43,14 +43,33 @@ def build_link(client_uuid: str, host: str, inbound: dict, name: str) -> str:
         if sids:
             params["sid"] = sids[0]
         params["spx"] = rset.get("spiderX") or "/"
-        params["flow"] = "xtls-rprx-vision"
     elif security == "tls":
         ts = stream.get("tlsSettings", {})
         params["sni"] = ts.get("serverName", "")
         params["fp"] = (ts.get("settings") or {}).get("fingerprint") or "chrome"
 
+    if network in ("xhttp", "splithttp"):
+        xs = stream.get("xhttpSettings") or stream.get("splithttpSettings") or {}
+        params["path"] = xs.get("path", "/")
+        if xs.get("host"):
+            params["host"] = xs["host"]
+        if xs.get("mode"):
+            params["mode"] = xs["mode"]
+    elif network == "ws":
+        ws = stream.get("wsSettings", {})
+        params["path"] = ws.get("path", "/")
+    params["flow"] = flow_for(inbound)
+
     query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items() if v != "")
     return f"vless://{client_uuid}@{host}:{port}?{query}#{quote(name)}"
+
+
+def flow_for(inbound: dict) -> str:
+    """xtls-rprx-vision допустим только для TCP/RAW + Reality/TLS. Для XHTTP, WS, gRPC и т.п. — пусто."""
+    stream = _as_dict(inbound.get("streamSettings"))
+    if stream.get("network", "tcp") in ("tcp", "raw") and stream.get("security") in ("reality", "tls"):
+        return "xtls-rprx-vision"
+    return ""
 
 
 def _find_strings(obj, prefix: str):
@@ -193,10 +212,11 @@ class XUI:
         mode = await self.detect()
         email = self.email_for(tg_id)
         client_uuid = str(uuidlib.uuid4())
+        flow = flow_for(await self.inbound())
         client = {
             "id": client_uuid,
             "email": email,
-            "flow": "xtls-rprx-vision",
+            "flow": flow,
             "limitIp": limit_ip,
             "totalGB": 0,
             "expiryTime": expiry_ts * 1000,
@@ -247,7 +267,7 @@ class XUI:
                             json={"email": email, "expiryTime": expiry_ts * 1000, "limitIp": limit_ip,
                                   "enable": enable, "tgId": int(tg_id)})
         else:
-            c = {"id": client_uuid, "email": email, "flow": "xtls-rprx-vision", "limitIp": limit_ip, "totalGB": 0,
+            c = {"id": client_uuid, "email": email, "flow": flow_for(await self.inbound()), "limitIp": limit_ip, "totalGB": 0,
                  "expiryTime": expiry_ts * 1000, "enable": enable, "tgId": str(tg_id),
                  "subId": client_uuid.replace("-", "")[:16], "reset": 0}
             await self._req("POST", f"/panel/api/inbounds/updateClient/{client_uuid}",
@@ -272,7 +292,7 @@ class XUI:
         ib = await self.inbound(refresh=True)
         stream = _as_dict(ib.get("streamSettings"))
         return (f"✅ Панель доступна (API {mode}). Инбаунд #{self.inbound_id}: {ib.get('protocol')}, "
-                f"порт {ib.get('port')}, защита {stream.get('security', '?')}")
+                f"порт {ib.get('port')}, {stream.get('network', '?')} + {stream.get('security', '?')}")
 
     async def close(self):
         if self._session and not self._session.closed:
