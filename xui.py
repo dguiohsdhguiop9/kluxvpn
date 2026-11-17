@@ -123,6 +123,7 @@ class XUI:
         self.inbound_id = int(inbound_id or 0)
         self.host = host or (urlparse(self.base).hostname or "")
         self.mode = None  # "v3" или "v2", определяется автоматически
+        self._logged_in = False
         self._session = None
         self._inbound_cache = None
 
@@ -161,21 +162,25 @@ class XUI:
             raise PanelError(f"Панель не отвечает на /login (HTTP {r.status}). Проверь XUI_URL")
         if not data.get("success"):
             raise PanelError(f"Не удалось войти в панель: {data.get('msg') or 'неверный логин или пароль'}")
+        self._logged_in = True
+        log.info("3X-UI: вход выполнен")
 
     async def _raw(self, method: str, path: str, **kw):
-        """Возвращает (http_status, json|None). Сам перелогинивается при необходимости."""
+        """Возвращает (http_status, json|None).
+        Панель 3X-UI отвечает 404 на ЛЮБОЙ запрос к API без входа, поэтому
+        сначала входим, а при 404/401/не-JSON — входим заново и повторяем один раз."""
         s = await self._sess()
+        if not self.token and not self._logged_in:
+            await self.login()
         for attempt in range(2):
             async with s.request(method, f"{self.base}{path}", **kw) as r:
                 status = r.status
                 text = await r.text()
-            if status == 404:
-                return 404, None
             try:
-                data = json.loads(text)
+                data = json.loads(text) if status != 404 else None
             except Exception:
                 data = None
-            if (status in (401, 403) or data is None) and attempt == 0 and not self.token:
+            if (status in (401, 403, 404) or data is None) and attempt == 0 and not self.token:
                 await self.login()
                 continue
             return status, data
