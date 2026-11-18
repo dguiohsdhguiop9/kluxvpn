@@ -170,7 +170,7 @@
   <!-- PLANS -->
   <section class="screen" id="plans">
     <h2>Тарифы</h2>
-    <p class="sub">Без логов, без ограничений по скорости</p>
+    <p class="sub">Без ограничений по скорости и трафику</p>
 
     <div class="tabs" id="payTabs">
       <div class="tab active" data-m="stars">⭐ Stars</div>
@@ -282,7 +282,7 @@ const loading = on => $('#loading').classList.toggle('hide', !on);
 async function api(path, body){
   const r = await fetch(API + path, {
     method: body ? 'POST' : 'GET',
-    headers: {'Content-Type':'application/json', 'X-Init-Data': tg.initData},
+    headers: {'Content-Type':'application/json', 'X-Init-Data': tg.initData, 'X-Platform': tg.platform || ''},
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await r.json().catch(()=>({}));

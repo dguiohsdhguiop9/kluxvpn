@@ -58,6 +58,14 @@ _conn.executescript(
 )
 _conn.commit()
 
+# миграции: добавляем новые колонки, если их ещё нет
+for col, typ in (("platform", "TEXT"), ("app_ip", "TEXT"), ("last_seen", "INTEGER DEFAULT 0")):
+    try:
+        _conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
+        _conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
 
 def now() -> int:
     return int(time.time())
@@ -263,3 +271,16 @@ def user_payments(uid: int, limit: int = 5):
 
 def all_users_full():
     return _conn.execute(f"SELECT {_USER_COLS} FROM users u ORDER BY u.created_at DESC").fetchall()
+
+
+def touch(uid: int, platform: str | None, ip: str | None):
+    """Последний вход в мини-апку: устройство, IP, время (хранится только последнее значение)."""
+    _conn.execute(
+        "UPDATE users SET platform=COALESCE(?, platform), app_ip=COALESCE(?, app_ip), last_seen=? WHERE id=?",
+        (platform or None, ip or None, now(), uid),
+    )
+    _conn.commit()
+
+
+def active_user_ids():
+    return [r[0] for r in _conn.execute("SELECT id FROM users WHERE expires_at>? AND uuid IS NOT NULL", (now(),)).fetchall()]

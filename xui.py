@@ -301,6 +301,34 @@ class XUI:
                 log.warning("Не удалось взять ссылку у панели, собираю сам: %s", e)
         return build_link(client_uuid, self.host, await self.inbound(), name)
 
+    async def client_ips(self, tg_id: int) -> list[str]:
+        """IP-адреса, с которых сейчас/недавно подключался клиент (панель ведёт их для лимита устройств)."""
+        email = quote(self.email_for(tg_id))
+        for method, path in (("POST", f"/panel/api/inbounds/clientIps/{email}"),
+                             ("GET", f"/panel/api/clients/ips/{email}"),
+                             ("POST", f"/panel/api/clients/clientIps/{email}")):
+            try:
+                obj = await self._req(method, path)
+            except PanelError:
+                continue
+            text = obj if isinstance(obj, str) else json.dumps(obj)
+            ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){3,7}\b", text)
+            return list(dict.fromkeys(ips))  # без повторов, порядок сохраняем
+        return []
+
+    async def client_traffic(self, tg_id: int) -> dict:
+        email = quote(self.email_for(tg_id))
+        for path in (f"/panel/api/inbounds/getClientTraffics/{email}", f"/panel/api/clients/traffic/{email}"):
+            try:
+                obj = await self._req("GET", path)
+                if isinstance(obj, list):
+                    obj = obj[0] if obj else {}
+                if isinstance(obj, dict):
+                    return obj
+            except PanelError:
+                continue
+        return {}
+
     async def ping(self) -> str:
         mode = await self.detect()
         ib = await self.inbound(refresh=True)

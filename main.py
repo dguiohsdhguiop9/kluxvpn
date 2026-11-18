@@ -560,7 +560,9 @@ async def cmd_terms(message: Message):
         "1. Подписка даёт доступ к VPN на выбранный срок.\n"
         f"2. Один ключ — до {DEVICES} устройств, передавать ключ третьим лицам нельзя.\n"
         "3. Запрещено использовать сервис для незаконной деятельности.\n"
-        "4. Если сервис не заработал — напиши в поддержку, разберёмся или вернём оплату.",
+        "4. Если сервис не заработал — напиши в поддержку, разберёмся или вернём оплату.\n"
+        "5. Мы не записываем, какие сайты ты посещаешь. Для защиты от передачи ключей "
+        "видим IP-адреса подключённых устройств и устройство, с которого открыто приложение.",
         parse_mode="HTML",
     )
 
@@ -902,6 +904,7 @@ def admin_kb() -> InlineKeyboardMarkup:
         [b("📊 Статистика", "adm:stats"), b("💰 Оплаты", "adm:pays")],
         [b("👥 Пользователи", "adm:ul:all:0"), b("🔎 Найти", "adm:find")],
         [b("🎁 Выдать дни", "adm:give"), b("📢 Рассылка", "adm:bc")],
+        [b("🕵️ Шаринг ключей", "adm:share"), b("🌍 Страны", "adm:countries")],
         [b("📥 Выгрузить CSV", "adm:csv"), b("🖥 Проверить сервер", "adm:srv")],
         [b(("🔔" if db.get_setting("notify_new", "1") == "1" else "🔕") + " Уведомления о новых", "adm:notify")],
     ])
@@ -1014,6 +1017,75 @@ def user_line(u) -> str:
     return f"<b>{who}</b>{un} <code>{u['id']}</code>\n    {user_status(u)}{paid}"
 
 
+# ---------------- гео по IP (ip-api.com, бесплатно, без ключа) ----------------
+_geo_cache: dict[str, dict] = {}
+PLATFORMS = {"ios": "📱 iPhone/iPad", "android": "🤖 Android", "android_x": "🤖 Android", "tdesktop": "💻 Telegram Desktop",
+             "macos": "💻 macOS", "weba": "🌐 Telegram Web", "webk": "🌐 Telegram Web", "web": "🌐 Telegram Web",
+             "unigram": "💻 Windows (Unigram)"}
+
+
+def flag(cc: str) -> str:
+    return "".join(chr(0x1F1E6 + ord(c) - 65) for c in cc.upper()) if cc and len(cc) == 2 else "🌍"
+
+
+async def geo(ips: list[str]) -> dict[str, dict]:
+    need = [ip for ip in ips if ip not in _geo_cache]
+    if need:
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as sess:
+                async with sess.post("http://ip-api.com/batch?fields=query,status,country,countryCode,city,isp",
+                                     json=[{"query": ip} for ip in need[:100]]) as r:
+                    for g in await r.json(content_type=None):
+                        if g.get("status") == "success":
+                            _geo_cache[g["query"]] = g
+        except Exception as e:
+            log.warning("geo: %s", e)
+    return {ip: _geo_cache.get(ip, {}) for ip in ips}
+
+
+def geo_line(ip: str, g: dict) -> str:
+    if not g:
+        return f"🌍 <code>{ip}</code>"
+    place = ", ".join(x for x in (g.get("country"), g.get("city")) if x)
+    return f"{flag(g.get('countryCode', ''))} <code>{ip}</code> — {esc(place)}" + (f" · {esc(g['isp'])}" if g.get("isp") else "")
+
+
+def fmt_bytes(n) -> str:
+    n = float(n or 0)
+    for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+        if n < 1024:
+            return f"{n:.1f} {unit}" if unit != "Б" else f"{int(n)} Б"
+        n /= 1024
+    return f"{n:.1f} ПБ"
+
+
+async def connections_block(u) -> str:
+    """Блок «Подключения»: устройства VPN сейчас, трафик, последний вход в мини-апку."""
+    lines = []
+    if u["uuid"] and xui.configured:
+        try:
+            ips = await xui.client_ips(u["id"])
+            tr = await xui.client_traffic(u["id"])
+        except Exception as e:
+            ips, tr = [], {}
+            lines.append(f"⚠️ Панель не ответила: {esc(e)}")
+        g = await geo(ips) if ips else {}
+        warn = " ⚠️ <b>больше лимита — похоже, делится ключом!</b>" if len(ips) > DEVICES else ""
+        lines.append(f"📡 <b>Устройства VPN: {len(ips)} из {DEVICES}</b>{warn}")
+        lines += [f"   {geo_line(ip, g.get(ip, {}))}" for ip in ips] or ["   сейчас не подключён (или в панели выключен журнал IP)"]
+        if tr:
+            lines.append(f"📶 Трафик: ↑ {fmt_bytes(tr.get('up'))} · ↓ {fmt_bytes(tr.get('down'))}")
+    if u["last_seen"]:
+        dev = PLATFORMS.get(u["platform"] or "", u["platform"] or "?")
+        app = f"🕹 Мини-апка: {dev} · {datetime.fromtimestamp(u['last_seen'], MSK).strftime('%d.%m %H:%M')}"
+        if u["app_ip"]:
+            g = (await geo([u["app_ip"]])).get(u["app_ip"], {})
+            app += f"\n   {geo_line(u['app_ip'], g)}"
+        lines.append(app)
+    return "\n".join(lines)
+
+
 async def render_user_list(call: CallbackQuery, flt: str, page: int):
     total = db.count_users(flt)
     pages = max(1, (total + PAGE - 1) // PAGE)
@@ -1051,7 +1123,7 @@ async def adm_user_list(call: CallbackQuery):
     await render_user_list(call, flt, int(page))
 
 
-def user_card(uid: int, back: str = "all:0"):
+async def user_card(uid: int, back: str = "all:0"):
     u = db.user_full(uid)
     if not u:
         return "Пользователь не найден", None
@@ -1070,11 +1142,14 @@ def user_card(uid: int, back: str = "all:0"):
         f"🤝 Пригласил: {u['invited_cnt']} · бонусных дней: {u['bonus_days']} · пришёл от: {ref}\n\n"
         f"🧾 <b>Последние оплаты:</b>\n{plines}"
     )
+    conn = await connections_block(u)
+    if conn:
+        text += "\n\n" + conn
     b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [b("+3 дня", f"adm:ud:{uid}:3:{back}"), b("+7 дней", f"adm:ud:{uid}:7:{back}"), b("+30 дней", f"adm:ud:{uid}:30:{back}")],
         [b("−7 дней", f"adm:ud:{uid}:-7:{back}"), b("⛔️ Отключить", f"adm:uoff:{uid}:{back}")],
-        [b("🔑 Отправить ключ заново", f"adm:usync:{uid}:{back}")],
+        [b("🔑 Отправить ключ заново", f"adm:usync:{uid}:{back}"), b("🔄 Обновить", f"adm:u:{uid}:{back}")],
         [b("✉️ Написать ему от бота", f"adm:uw:{uid}")],
         [b("« К списку", f"adm:ul:{back}")],
     ])
@@ -1082,7 +1157,7 @@ def user_card(uid: int, back: str = "all:0"):
 
 
 async def show_user_card(call: CallbackQuery, uid: int, back: str):
-    text, kb = user_card(uid, back)
+    text, kb = await user_card(uid, back)
     try:
         await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
@@ -1176,12 +1251,61 @@ async def adm_find_input(message: Message, state: FSMContext):
     if not users:
         return await message.answer("Никого не нашёл 🤷")
     if len(users) == 1:
-        text, kb = user_card(users[0]["id"])
+        text, kb = await user_card(users[0]["id"])
         return await message.answer(text, reply_markup=kb, parse_mode="HTML")
     b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
     lines = [f"🔎 Найдено: {len(users)}\n"] + [f"{i + 1}. {user_line(u)}" for i, u in enumerate(users)]
     rows = [[b(f"👤 {(u['name'] or u['username'] or u['id'])}"[:28], f"adm:u:{u['id']}:all:0")] for u in users]
     await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data == "adm:share")
+async def adm_share(call: CallbackQuery):
+    """Проверяет всех активных: у кого устройств больше лимита."""
+    if not xui.configured:
+        return await call.answer("Панель не настроена", show_alert=True)
+    await call.answer("Проверяю всех активных…")
+    ids = db.active_user_ids()
+    msg = await call.message.answer(f"🕵️ Проверяю {len(ids)} активных ключей…")
+    found = []
+    for uid in ids:
+        try:
+            ips = await xui.client_ips(uid)
+        except Exception:
+            continue
+        if len(ips) > DEVICES:
+            found.append((uid, ips))
+    if not found:
+        return await msg.edit_text(f"✅ Всё чисто: ни у кого из {len(ids)} нет больше {DEVICES} устройств.")
+    lines = [f"⚠️ <b>Больше {DEVICES} устройств: {len(found)}</b>\n"]
+    rows = []
+    for uid, ips in found[:30]:
+        u = db.get_user(uid)
+        g = await geo(ips)
+        countries = " ".join(sorted({flag(g.get(ip, {}).get("countryCode", "")) for ip in ips}))
+        lines.append(f"• <b>{esc(u['name'] or uid)}</b> <code>{uid}</code> — {len(ips)} устр. {countries}")
+        rows.append([InlineKeyboardButton(text=f"👤 {(u['name'] or str(uid))}"[:28], callback_data=f"adm:u:{uid}:active:0")])
+    await msg.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data == "adm:countries")
+async def adm_countries(call: CallbackQuery):
+    """Страны пользователей по последнему входу в мини-апку и по подключениям VPN."""
+    await call.answer("Считаю…")
+    users = db.all_users_full()
+    ips = {u["id"]: u["app_ip"] for u in users if u["app_ip"]}
+    g = await geo(list(set(ips.values())))
+    by_country: dict[str, int] = {}
+    for uid, ip in ips.items():
+        c = g.get(ip, {})
+        key = f"{flag(c.get('countryCode', ''))} {c.get('country') or 'Неизвестно'}"
+        by_country[key] = by_country.get(key, 0) + 1
+    unknown = len(users) - len(ips)
+    lines = ["🌍 <b>Откуда пользователи</b> (по последнему входу в мини-апку)\n"]
+    lines += [f"{k} — <b>{v}</b>" for k, v in sorted(by_country.items(), key=lambda x: -x[1])] or ["Пока нет данных"]
+    if unknown:
+        lines.append(f"\n❔ Ещё не открывали мини-апку: {unknown}")
+    await call.message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @admin_r.callback_query(F.data == "adm:csv")
@@ -1192,11 +1316,14 @@ async def adm_csv(call: CallbackQuery):
     await call.answer("Готовлю файл…")
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["id", "username", "имя", "зарегистрирован", "подписка до", "активна", "пробный", "оплат", "звёзд", "рублей", "пригласил", "пришёл от"])
+    w.writerow(["id", "username", "имя", "зарегистрирован", "подписка до", "активна", "пробный", "оплат", "звёзд", "рублей",
+                "пригласил", "пришёл от", "устройство", "IP мини-апки", "последний вход"])
     for u in db.all_users_full():
         w.writerow([u["id"], u["username"] or "", u["name"] or "", fmt_date(u["created_at"]),
                     fmt_date(u["expires_at"]) if u["expires_at"] else "", "да" if is_active(u) else "нет",
-                    "да" if u["trial_used"] else "нет", u["pays"], u["stars_sum"], u["rub_sum"], u["invited_cnt"], u["referrer"] or ""])
+                    "да" if u["trial_used"] else "нет", u["pays"], u["stars_sum"], u["rub_sum"], u["invited_cnt"], u["referrer"] or "",
+                    PLATFORMS.get(u["platform"] or "", u["platform"] or ""), u["app_ip"] or "",
+                    datetime.fromtimestamp(u["last_seen"], MSK).strftime("%d.%m.%Y %H:%M") if u["last_seen"] else ""])
     data = ("\ufeff" + buf.getvalue()).encode("utf-8")  # BOM — чтобы Excel открыл кириллицу
     await call.message.answer_document(
         BufferedInputFile(data, filename=f"klyxvpn_users_{datetime.now(MSK).strftime('%Y-%m-%d')}.csv"),
@@ -1488,7 +1615,7 @@ async def cors(request, handler):
             log.exception("API error: %s", e)
             resp = web.json_response({"error": "server error"}, status=500)
     resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Init-Data"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Init-Data, X-Platform"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
 
@@ -1499,6 +1626,13 @@ def api_user(request):
         raise web.HTTPUnauthorized(text='{"error":"bad init data"}')
     name = " ".join(x for x in [tg.get("first_name"), tg.get("last_name")] if x)
     db.upsert_user(tg["id"], tg.get("username"), name)
+    fwd = request.headers.get("X-Forwarded-For", "") or request.headers.get("X-Real-IP", "")
+    ip = fwd.split(",")[0].strip() or request.remote
+    platform = (request.headers.get("X-Platform") or "")[:20]
+    try:
+        db.touch(tg["id"], platform, ip)
+    except Exception:
+        pass
     return db.get_user(tg["id"])
 
 
