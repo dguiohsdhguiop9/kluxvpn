@@ -189,6 +189,17 @@
       </ul>
     </div>
     <div class="srv-sub" id="payNote" style="text-align:center;margin:0 0 12px"></div>
+    <div class="card" id="cryptoHelp" style="display:none">
+      <div class="row" id="cryptoHelpToggle" style="cursor:pointer"><b>🪙 Нет крипты? Как купить за рубли</b><span class="chev" id="chChev">›</span></div>
+      <ol class="steps" id="cryptoSteps" style="display:none;margin-top:10px">
+        <li>Открой <b>@CryptoBot</b> → <b>Start</b></li>
+        <li><b>Кошелёк</b> → <b>P2P-маркет</b> → <b>Купить</b> → <b>USDT</b></li>
+        <li>Выбери продавца с оплатой <b>картой или СБП</b> в рублях (смотри на рейтинг)</li>
+        <li>Переведи рубли продавцу и нажми «Я оплатил» — USDT придут в кошелёк</li>
+        <li>Вернись сюда → <b>Оплатить криптой</b> → подтверди счёт в @CryptoBot</li>
+      </ol>
+      <button class="btn ghost" id="openCryptoBot" style="margin-top:10px;display:none">Открыть @CryptoBot</button>
+    </div>
     <button class="btn" id="payBtn">Оплатить</button>
   </section>
 
@@ -363,11 +374,22 @@ function renderPlans(){
   const label = {stars:'Оплатить ', card:'Оплатить картой ', crypto:'Оплатить криптой '}[method];
   $('#payBtn').textContent = label + fmtNum(priceOf(p, method)) + unit[method];
   $('#payBtn').disabled = !hasMethod(method);
+  $('#cryptoHelp').style.display = method === 'crypto' ? '' : 'none';
   // показываем только доступные способы оплаты
   const tabs = document.querySelectorAll('#payTabs .tab');
   tabs.forEach(t => t.style.display = hasMethod(t.dataset.m) ? '' : 'none');
   $('#payTabs').style.display = (S.methods && S.methods.length < 2) ? 'none' : '';
 }
+
+// ---------- помощь с криптой ----------
+$('#cryptoHelpToggle').onclick = () => {
+  const open = $('#cryptoSteps').style.display === 'none';
+  $('#cryptoSteps').style.display = open ? '' : 'none';
+  $('#openCryptoBot').style.display = open ? '' : 'none';
+  $('#chChev').style.transform = open ? 'rotate(90deg)' : '';
+  haptic();
+};
+$('#openCryptoBot').onclick = () => { haptic(); if (tg && tg.openTelegramLink) tg.openTelegramLink('https://t.me/CryptoBot'); else toast('Открой @CryptoBot в Telegram'); };
 
 // ---------- навигация ----------
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {

@@ -204,3 +204,62 @@ def get_setting(key: str, default: str = "") -> str:
 def set_setting(key: str, value: str):
     _conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
     _conn.commit()
+
+
+# ---------------- выборки для админки ----------------
+USER_FILTERS = {
+    "all": ("Все", "1=1"),
+    "active": ("Активные", "u.expires_at > :now"),
+    "paid": ("Платившие", "EXISTS (SELECT 1 FROM payments p WHERE p.user_id=u.id AND p.refunded=0)"),
+    "trial": ("Только пробный", "u.trial_used=1 AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.user_id=u.id AND p.refunded=0)"),
+    "expired": ("Подписка кончилась", "u.expires_at > 0 AND u.expires_at <= :now"),
+    "new": ("Новые за сутки", "u.created_at > :day"),
+    "none": ("Без подписки", "u.expires_at = 0 AND u.trial_used=0"),
+}
+
+_USER_COLS = """u.*,
+    (SELECT COUNT(*) FROM payments p WHERE p.user_id=u.id AND p.refunded=0) AS pays,
+    (SELECT COALESCE(SUM(amount),0) FROM payments p WHERE p.user_id=u.id AND p.refunded=0 AND p.currency='XTR') AS stars_sum,
+    (SELECT COALESCE(SUM(amount),0) FROM payments p WHERE p.user_id=u.id AND p.refunded=0 AND p.currency='RUB') AS rub_sum,
+    (SELECT COUNT(*) FROM users r WHERE r.referrer=u.id) AS invited_cnt"""
+
+
+def _params():
+    t = now()
+    return {"now": t, "day": t - 86400}
+
+
+def count_users(flt: str) -> int:
+    where = USER_FILTERS.get(flt, USER_FILTERS["all"])[1]
+    return _conn.execute(f"SELECT COUNT(*) FROM users u WHERE {where}", _params()).fetchone()[0]
+
+
+def list_users(flt: str, offset: int, limit: int = 10):
+    where = USER_FILTERS.get(flt, USER_FILTERS["all"])[1]
+    return _conn.execute(
+        f"SELECT {_USER_COLS} FROM users u WHERE {where} ORDER BY u.created_at DESC LIMIT :lim OFFSET :off",
+        {**_params(), "lim": limit, "off": offset},
+    ).fetchall()
+
+
+def user_full(uid: int):
+    return _conn.execute(f"SELECT {_USER_COLS} FROM users u WHERE u.id=?", (uid,)).fetchone()
+
+
+def search_users(q: str, limit: int = 20):
+    q = q.strip().lstrip("@")
+    if q.isdigit():
+        return _conn.execute(f"SELECT {_USER_COLS} FROM users u WHERE u.id=?", (int(q),)).fetchall()
+    qf = q.casefold()  # SQLite не умеет lower() для кириллицы — ищем в Python
+    res = [u for u in all_users_full() if qf in (u["username"] or "").casefold() or qf in (u["name"] or "").casefold()]
+    return res[:limit]
+
+
+def user_payments(uid: int, limit: int = 5):
+    return _conn.execute(
+        "SELECT * FROM payments WHERE user_id=? ORDER BY id DESC LIMIT ?", (uid, limit)
+    ).fetchall()
+
+
+def all_users_full():
+    return _conn.execute(f"SELECT {_USER_COLS} FROM users u ORDER BY u.created_at DESC").fetchall()

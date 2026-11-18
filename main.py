@@ -27,6 +27,7 @@ from aiogram.filters import BaseFilter, Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
@@ -90,6 +91,19 @@ PLANS = {
 
 # Цены в рублях (для карты и крипты — крипта считается по курсу от рублёвой цены)
 RUB_PRICES = {"m1": 195, "m3": 495, "m12": 1560}
+
+CRYPTO_HELP = (
+    "🪙 <b>Как оплатить криптой, если её нет</b>\n\n"
+    "Это проще, чем кажется — 3–5 минут:\n\n"
+    "<b>1.</b> Открой @CryptoBot → нажми <b>Start</b>\n"
+    "<b>2.</b> Зайди в <b>Кошелёк</b> → <b>P2P-маркет</b> → <b>Купить</b> → выбери <b>USDT</b>\n"
+    "<b>3.</b> Выбери продавца с оплатой <b>картой или СБП в рублях</b> (смотри на рейтинг и число сделок)\n"
+    "<b>4.</b> Переведи рубли продавцу по реквизитам и нажми «Я оплатил» — USDT придут в кошелёк\n"
+    "<b>5.</b> Вернись сюда и нажми <b>«Оплатить»</b> — счёт откроется в @CryptoBot, подтверди оплату\n\n"
+    "🔸 Покупай чуть больше суммы счёта — курс может немного меняться\n"
+    "🔸 Ключ придёт сюда автоматически сразу после оплаты\n"
+    "🔸 Застрял? Жми «Поддержка» — поможем"
+)
 
 METHOD_NAMES = {"stars": "⭐ Telegram Stars", "crypto": "🪙 Криптовалюта", "card": "💳 Картой (рубли)"}
 
@@ -502,6 +516,13 @@ async def cmd_start(message: Message, command: CommandObject):
     u, is_new = ensure_user(message.from_user, referrer)
     if is_new:
         await send_sticker(message.from_user.id, "hello")
+        if db.get_setting("notify_new", "1") == "1":
+            fu = message.from_user
+            src = f" · пришёл от <code>{u['referrer']}</code>" if u["referrer"] else ""
+            await notify_admin(
+                f"🆕 Новый пользователь: <b>{esc(fu.full_name)}</b>" + (f" @{esc(fu.username)}" if fu.username else "")
+                + f" <code>{fu.id}</code>{src}\nВсего: {db.stats()['users']}"
+            )
     if is_new and u["referrer"]:
         try:
             await main_bot.send_message(
@@ -581,7 +602,8 @@ async def cb_plan(call: CallbackQuery):
         price = f"{stars} ⭐" if m == "stars" else f"{RUB_PRICES[key]} ₽"
         rows.append([InlineKeyboardButton(text=f"{METHOD_NAMES[m]} — {price}", callback_data=f"pay:{m}:{key}")])
     rows.append([InlineKeyboardButton(text="« Другой тариф", callback_data="buy")])
-    await edit_or_send(call, f"🧾 <b>Тариф: {name}</b>\n\nВыбери способ оплаты:", InlineKeyboardMarkup(inline_keyboard=rows), "pay")
+    hint = "\n\n🪙 Нет крипты? Не страшно — внутри будет пошаговая инструкция, как купить её за рубли." if "crypto" in methods() else ""
+    await edit_or_send(call, f"🧾 <b>Тариф: {name}</b>\n\nВыбери способ оплаты:{hint}", InlineKeyboardMarkup(inline_keyboard=rows), "pay")
     await call.answer()
 
 
@@ -625,12 +647,34 @@ async def start_payment(call: CallbackQuery, method: str, key: str):
         "card": "Откроется страница ЮMoney — оплати картой любого банка РФ.",
     }
     rows = [[InlineKeyboardButton(text=f"Оплатить {price}", url=link)]]
+    if method == "crypto":
+        rows.append([InlineKeyboardButton(text="❓ Как купить крипту за рубли", callback_data=f"cryptohelp:{key}")])
     if inv_id:
         rows.append([InlineKeyboardButton(text="⏳ Я оплатил — проверить", callback_data=f"chk:{inv_id}")])
     rows.append([InlineKeyboardButton(text="« Другой способ", callback_data=f"plan:{key}")])
     await show(call, "pay",
                f"🧾 <b>{name}</b> — {price}\n{METHOD_NAMES[method]}\n\n{hints[method]}\nКлюч придёт сюда сразу после оплаты.",
                InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@main_r.callback_query(F.data.startswith("cryptohelp:"))
+async def cb_cryptohelp(call: CallbackQuery):
+    key = call.data.split(":", 1)[1]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🪙 Открыть @CryptoBot", url="https://t.me/CryptoBot")],
+        [InlineKeyboardButton(text="🔥 Перейти к оплате", callback_data=f"pay:crypto:{key}" if key in PLANS else "buy")],
+        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")],
+    ])
+    await show(call, "pay", CRYPTO_HELP, kb)
+    await call.answer()
+
+
+@main_r.message(Command("crypto"))
+async def cmd_crypto(message: Message):
+    await show(message, "pay", CRYPTO_HELP, InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🪙 Открыть @CryptoBot", url="https://t.me/CryptoBot")],
+        [InlineKeyboardButton(text="🔥 Выбрать тариф", callback_data="buy")],
+    ]))
 
 
 @main_r.callback_query(F.data.startswith("chk:"))
@@ -830,6 +874,8 @@ class AdminSG(StatesGroup):
     give = State()
     broadcast = State()
     password = State()
+    find = State()
+    write = State()
 
 
 ADMIN_SESSION_SEC = 12 * 3600
@@ -854,8 +900,10 @@ def admin_kb() -> InlineKeyboardMarkup:
     b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
     return InlineKeyboardMarkup(inline_keyboard=[
         [b("📊 Статистика", "adm:stats"), b("💰 Оплаты", "adm:pays")],
+        [b("👥 Пользователи", "adm:ul:all:0"), b("🔎 Найти", "adm:find")],
         [b("🎁 Выдать дни", "adm:give"), b("📢 Рассылка", "adm:bc")],
-        [b("🖥 Проверить сервер", "adm:srv")],
+        [b("📥 Выгрузить CSV", "adm:csv"), b("🖥 Проверить сервер", "adm:srv")],
+        [b(("🔔" if db.get_setting("notify_new", "1") == "1" else "🔕") + " Уведомления о новых", "adm:notify")],
     ])
 
 
@@ -920,6 +968,14 @@ async def adm_menu(message: Message, state: FSMContext):
 async def adm_stats(call: CallbackQuery):
     s = db.stats()
     await call.answer()
+    c = db.count_users
+    b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [b(f"🟠 Активные ({c('active')})", "adm:ul:active:0"), b(f"🆕 Новые ({c('new')})", "adm:ul:new:0")],
+        [b(f"💰 Платившие ({c('paid')})", "adm:ul:paid:0"), b(f"🎁 Пробный ({c('trial')})", "adm:ul:trial:0")],
+        [b(f"⌛️ Кончилась ({c('expired')})", "adm:ul:expired:0"), b(f"⚫️ Без подписки ({c('none')})", "adm:ul:none:0")],
+        [b(f"👥 Все ({c('all')})", "adm:ul:all:0")],
+    ])
     await call.message.answer(
         "📊 <b>Статистика</b>\n\n"
         f"👤 Пользователей: <b>{s['users']}</b> (+{s['users_today']} за сутки)\n"
@@ -927,9 +983,236 @@ async def adm_stats(call: CallbackQuery):
         f"🎁 Взяли пробный: {s['trials']}\n"
         f"💰 Оплат: <b>{s['payments']}</b>\n"
         f"⭐ Звёзд всего: <b>{s['stars']}</b> (за сутки: {s['stars_today']})\n"
-        f"₽ Рублями (карта/крипта): <b>{s['rub']}</b> (за сутки: {s['rub_today']})",
+        f"₽ Рублями (карта/крипта): <b>{s['rub']}</b> (за сутки: {s['rub_today']})\n\n"
+        "👇 Нажми, чтобы увидеть конкретных людей:",
+        reply_markup=kb,
         parse_mode="HTML",
     )
+
+
+# ---------------- список пользователей ----------------
+PAGE = 8
+
+
+def user_status(u) -> str:
+    if is_active(u):
+        return f"🟠 до {fmt_date(u['expires_at'])}"
+    if u["expires_at"]:
+        return f"⌛️ кончилась {fmt_date(u['expires_at'])}"
+    return "🎁 пробный" if u["trial_used"] else "⚫️ нет"
+
+
+def user_line(u) -> str:
+    who = esc(u["name"] or "без имени")
+    un = f" @{esc(u['username'])}" if u["username"] else ""
+    money = []
+    if u["stars_sum"]:
+        money.append(f"{u['stars_sum']}⭐")
+    if u["rub_sum"]:
+        money.append(f"{u['rub_sum']}₽")
+    paid = f" · 💰 {' + '.join(money)}" if money else ""
+    return f"<b>{who}</b>{un} <code>{u['id']}</code>\n    {user_status(u)}{paid}"
+
+
+async def render_user_list(call: CallbackQuery, flt: str, page: int):
+    total = db.count_users(flt)
+    pages = max(1, (total + PAGE - 1) // PAGE)
+    page = max(0, min(page, pages - 1))
+    users = db.list_users(flt, page * PAGE, PAGE)
+    title = db.USER_FILTERS.get(flt, db.USER_FILTERS["all"])[0]
+    lines = [f"👥 <b>{title}</b> — {total} чел. · стр. {page + 1}/{pages}\n"]
+    lines += [f"{page * PAGE + i + 1}. {user_line(u)}" for i, u in enumerate(users)] or ["Пока никого 🤷"]
+    b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
+    rows = []
+    for i in range(0, len(users), 2):
+        rows.append([b(f"👤 {(u['name'] or u['username'] or u['id'])}"[:28], f"adm:u:{u['id']}:{flt}:{page}") for u in users[i:i + 2]])
+    nav = []
+    if page > 0:
+        nav.append(b("◀️", f"adm:ul:{flt}:{page - 1}"))
+    if page < pages - 1:
+        nav.append(b("▶️", f"adm:ul:{flt}:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([b(f"{'• ' if k == flt else ''}{v[0]}", f"adm:ul:{k}:0") for k, v in list(db.USER_FILTERS.items())[:3]])
+    rows.append([b(f"{'• ' if k == flt else ''}{v[0]}", f"adm:ul:{k}:0") for k, v in list(db.USER_FILTERS.items())[3:6]])
+    rows.append([b("🔎 Найти", "adm:find"), b("📥 CSV", "adm:csv")])
+    text = "\n".join(lines)
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data.startswith("adm:ul:"))
+async def adm_user_list(call: CallbackQuery):
+    _, _, flt, page = call.data.split(":")
+    await call.answer()
+    await render_user_list(call, flt, int(page))
+
+
+def user_card(uid: int, back: str = "all:0"):
+    u = db.user_full(uid)
+    if not u:
+        return "Пользователь не найден", None
+    pays = db.user_payments(uid)
+    plines = "\n".join(
+        f"   • {fmt_date(p['created_at'])} — {p['amount']} {'⭐' if p['currency'] == 'XTR' else '₽'} "
+        f"({PLANS.get(p['plan'], ('?',))[0]}){' ↩️' if p['refunded'] else ''}" for p in pays
+    ) or "   нет"
+    ref = f"<code>{u['referrer']}</code>" if u["referrer"] else "—"
+    text = (
+        f"👤 <b>{esc(u['name'] or 'без имени')}</b>" + (f" @{esc(u['username'])}" if u["username"] else "") + "\n"
+        f"🆔 <code>{u['id']}</code> · с нами с {fmt_date(u['created_at'])}\n\n"
+        f"📶 Подписка: {user_status(u)}" + (f" (осталось {days_left(u)} дн.)" if is_active(u) else "") + "\n"
+        f"🔑 Ключ в панели: {'есть' if u['uuid'] else 'нет'} · 🎁 пробный: {'брал' if u['trial_used'] else 'нет'}\n"
+        f"💰 Оплат: <b>{u['pays']}</b> · ⭐ {u['stars_sum']} · ₽ {u['rub_sum']}\n"
+        f"🤝 Пригласил: {u['invited_cnt']} · бонусных дней: {u['bonus_days']} · пришёл от: {ref}\n\n"
+        f"🧾 <b>Последние оплаты:</b>\n{plines}"
+    )
+    b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [b("+3 дня", f"adm:ud:{uid}:3:{back}"), b("+7 дней", f"adm:ud:{uid}:7:{back}"), b("+30 дней", f"adm:ud:{uid}:30:{back}")],
+        [b("−7 дней", f"adm:ud:{uid}:-7:{back}"), b("⛔️ Отключить", f"adm:uoff:{uid}:{back}")],
+        [b("🔑 Отправить ключ заново", f"adm:usync:{uid}:{back}")],
+        [b("✉️ Написать ему от бота", f"adm:uw:{uid}")],
+        [b("« К списку", f"adm:ul:{back}")],
+    ])
+    return text, kb
+
+
+async def show_user_card(call: CallbackQuery, uid: int, back: str):
+    text, kb = user_card(uid, back)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data.startswith("adm:u:"))
+async def adm_user(call: CallbackQuery):
+    _, _, uid, flt, page = call.data.split(":")
+    await call.answer()
+    await show_user_card(call, int(uid), f"{flt}:{page}")
+
+
+@admin_r.callback_query(F.data.startswith("adm:ud:"))
+async def adm_user_days(call: CallbackQuery):
+    _, _, uid, days, flt, page = call.data.split(":")
+    uid, days = int(uid), int(days)
+    ok, link = await add_days(uid, days)
+    await call.answer(f"{'✅' if ok else '⚠️'} {'+' if days > 0 else ''}{days} дн.", show_alert=not ok)
+    if days > 0:
+        u = db.get_user(uid)
+        msg = f"🎁 Тебе начислено <b>+{days} дн.</b> KlyxVPN! Подписка до {fmt_date(u['expires_at'])}"
+        if link:
+            msg += f"\n\n🔑 Ключ:\n<code>{esc(link)}</code>"
+        try:
+            await send_screen(uid, "success", msg)
+        except Exception:
+            pass
+    await show_user_card(call, uid, f"{flt}:{page}")
+
+
+@admin_r.callback_query(F.data.startswith("adm:uoff:"))
+async def adm_user_off(call: CallbackQuery):
+    _, _, uid, flt, page = call.data.split(":")
+    uid = int(uid)
+    db.set_expires(uid, int(time.time()) - 1)
+    try:
+        await sync_user(uid)
+        await call.answer("⛔️ Подписка отключена")
+    except Exception as e:
+        await call.answer(f"В базе отключено, панель: {e}"[:190], show_alert=True)
+    await show_user_card(call, uid, f"{flt}:{page}")
+
+
+@admin_r.callback_query(F.data.startswith("adm:usync:"))
+async def adm_user_sync(call: CallbackQuery):
+    _, _, uid, flt, page = call.data.split(":")
+    uid = int(uid)
+    try:
+        await sync_user(uid)
+        link = await key_for(db.get_user(uid))
+        if link:
+            await main_bot.send_message(uid, f"🔑 Твой ключ KlyxVPN:\n<code>{esc(link)}</code>", parse_mode="HTML")
+        await call.answer("✅ Ключ отправлен")
+    except Exception as e:
+        await call.answer(f"❌ {e}"[:190], show_alert=True)
+
+
+@admin_r.callback_query(F.data.startswith("adm:uw:"))
+async def adm_user_write(call: CallbackQuery, state: FSMContext):
+    uid = int(call.data.split(":")[2])
+    await state.set_state(AdminSG.write)
+    await state.update_data(write_to=uid)
+    await call.answer()
+    await call.message.answer(f"✉️ Напиши сообщение для <code>{uid}</code> (текст, фото — что угодно). Оно уйдёт от имени бота.\n/cancel — отмена", parse_mode="HTML")
+
+
+@admin_r.message(AdminSG.write)
+async def adm_user_write_send(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    uid = data.get("write_to")
+    try:
+        await main_bot.copy_message(uid, message.chat.id, message.message_id)
+        await message.answer("✅ Отправлено")
+    except Exception as e:
+        await message.answer(f"❌ Не доставлено: {esc(e)}", parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data == "adm:find")
+async def adm_find(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSG.find)
+    await call.answer()
+    await call.message.answer("🔎 Пришли ID, @юзернейм или часть имени\n/cancel — отмена")
+
+
+@admin_r.message(AdminSG.find)
+async def adm_find_input(message: Message, state: FSMContext):
+    await state.clear()
+    users = db.search_users(message.text or "")
+    if not users:
+        return await message.answer("Никого не нашёл 🤷")
+    if len(users) == 1:
+        text, kb = user_card(users[0]["id"])
+        return await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
+    lines = [f"🔎 Найдено: {len(users)}\n"] + [f"{i + 1}. {user_line(u)}" for i, u in enumerate(users)]
+    rows = [[b(f"👤 {(u['name'] or u['username'] or u['id'])}"[:28], f"adm:u:{u['id']}:all:0")] for u in users]
+    await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data == "adm:csv")
+async def adm_csv(call: CallbackQuery):
+    import csv
+    import io
+
+    await call.answer("Готовлю файл…")
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["id", "username", "имя", "зарегистрирован", "подписка до", "активна", "пробный", "оплат", "звёзд", "рублей", "пригласил", "пришёл от"])
+    for u in db.all_users_full():
+        w.writerow([u["id"], u["username"] or "", u["name"] or "", fmt_date(u["created_at"]),
+                    fmt_date(u["expires_at"]) if u["expires_at"] else "", "да" if is_active(u) else "нет",
+                    "да" if u["trial_used"] else "нет", u["pays"], u["stars_sum"], u["rub_sum"], u["invited_cnt"], u["referrer"] or ""])
+    data = ("\ufeff" + buf.getvalue()).encode("utf-8")  # BOM — чтобы Excel открыл кириллицу
+    await call.message.answer_document(
+        BufferedInputFile(data, filename=f"klyxvpn_users_{datetime.now(MSK).strftime('%Y-%m-%d')}.csv"),
+        caption=f"📥 Все пользователи: {len(db.all_user_ids())}",
+    )
+
+
+@admin_r.callback_query(F.data == "adm:notify")
+async def adm_notify(call: CallbackQuery, state: FSMContext):
+    on = db.get_setting("notify_new", "1") != "1"
+    db.set_setting("notify_new", "1" if on else "0")
+    await call.answer("🔔 Уведомления о новых пользователях включены" if on else "🔕 Уведомления выключены", show_alert=True)
+    try:
+        await call.message.edit_reply_markup(reply_markup=decorate(admin_kb()))
+    except Exception:
+        pass
 
 
 @admin_r.callback_query(F.data == "adm:pays")
