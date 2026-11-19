@@ -146,7 +146,7 @@ class XUI:
                 "Origin": origin,
                 "Referer": self.base + "/",
                 "X-Requested-With": "XMLHttpRequest",
-                "User-Agent": "Mozilla/5.0 (KlyxVPN bot)",
+                "User-Agent": "Mozilla/5.0 (KluxVPN bot)",
             }
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
@@ -236,7 +236,7 @@ class XUI:
             "expiryTime": expiry_ts * 1000,
             "enable": True,
             "subId": client_uuid.replace("-", "")[:16],
-            "comment": "KlyxVPN",
+            "comment": "KluxVPN",
         }
         try:
             if mode == "v3":
@@ -288,7 +288,7 @@ class XUI:
                             json={"id": self.inbound_id, "settings": json.dumps({"clients": [c]})})
         log.info("3X-UI: обновлён клиент %s (до %s)", email, expiry_ts)
 
-    async def link(self, client_uuid: str, tg_id: int, name: str = "KlyxVPN") -> str:
+    async def link(self, client_uuid: str, tg_id: int, name: str = "KluxVPN") -> str:
         mode = await self.detect()
         if mode == "v3":
             try:

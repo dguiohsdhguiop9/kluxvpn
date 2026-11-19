@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>KlyxVPN</title>
+<title>KluxVPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700;800&display=swap" rel="stylesheet">
@@ -227,7 +227,7 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
 <div class="bg"><div class="grid"></div><div class="blob b1"></div><div class="blob b2"></div><div class="noise"></div></div>
 <div class="app">
   <header>
-    <div class="logo"><i>K</i><span>KlyxVPN</span></div>
+    <div class="logo"><i>K</i><span>KluxVPN</span></div>
     <div class="badge" id="subBadge">Нет подписки</div>
   </header>
 
@@ -412,7 +412,7 @@ const DEMO = {
   plans: [{key:'m1',name:'1 месяц',stars:129,rub:195,days:30},{key:'m3',name:'3 месяца',stars:324,rub:495,days:90},{key:'m12',name:'12 месяцев',stars:1039,rub:1560,days:365}],
   methods: ['stars','sbp','crypto'],
   servers: [{name:'🇫🇷 Франция',protocol:'VLESS Reality'}],
-  ref_link: 'https://t.me/klyxvpn_bot?start=ref0', ref_bonus: 7, invited: 0, bonus_days: 0, support: '', bot: 'klyxvpn_bot',
+  ref_link: 'https://t.me/kluxvpn_bot?start=ref0', ref_bonus: 7, invited: 0, bonus_days: 0, support: '', bot: 'kluxvpn_bot',
 };
 let S = DEMO;
 let method = 'stars', planKey = 'm3', curServer = 0;
@@ -562,13 +562,13 @@ function demoActivate(){
   const p = S.plans.find(x => x.key===planKey);
   const exp = new Date(Date.now() + p.days*86400000);
   S = {...S, active:true, days_left:p.days, expires_text: exp.toLocaleDateString('ru-RU'), trial_available:false,
-    key:`vless://${crypto.randomUUID ? crypto.randomUUID() : 'demo'}@nl1.klyxvpn.net:443?type=tcp&security=reality&pbk=Xk3...&fp=chrome&sni=www.microsoft.com&flow=xtls-rprx-vision#KlyxVPN`};
+    key:`vless://${crypto.randomUUID ? crypto.randomUUID() : 'demo'}@nl1.kluxvpn.net:443?type=tcp&security=reality&pbk=Xk3...&fp=chrome&sni=www.microsoft.com&flow=xtls-rprx-vision#KluxVPN`};
   render(); closePay(); toast('Демо: оплачено, ключ готов 🎉'); confetti(); setTimeout(()=>go('keyScr'),600);
 }
 
 function needAuth(){
   openPay(`<h2>Открой приложение заново</h2>
-    <p class="srv-sub" style="margin:6px 0 16px;line-height:1.5">Telegram не передал данные аккаунта. Закрой это окно и открой KlyxVPN кнопкой <b>«KlyxVPN»</b> слева от поля ввода или кнопкой <b>«⚡️ Открыть KlyxVPN»</b> в сообщении бота.</p>
+    <p class="srv-sub" style="margin:6px 0 16px;line-height:1.5">Telegram не передал данные аккаунта. Закрой это окно и открой KluxVPN кнопкой <b>«KluxVPN»</b> слева от поля ввода или кнопкой <b>«⚡️ Открыть KluxVPN»</b> в сообщении бота.</p>
     <button class="btn" id="closeApp">Понятно</button>`);
   $('#closeApp').onclick = () => { try { tg.close(); } catch(e) { closePay(); } };
 }
@@ -606,7 +606,7 @@ $('#payBtn').onclick = async () => {
 $('#trialBtn').onclick = async () => {
   haptic('medium');
   if (NO_AUTH) return needAuth();
-  if (!LIVE) { planKey='m1'; S = {...S, plans:S.plans}; const d=S.trial_days; S={...S, active:true, days_left:d, expires_text:new Date(Date.now()+d*86400000).toLocaleDateString('ru-RU'), trial_available:false, key:'vless://demo-trial@nl1.klyxvpn.net:443?security=reality#KlyxVPN'}; render(); toast('Демо: пробный период активирован'); confetti(); return go('keyScr'); }
+  if (!LIVE) { planKey='m1'; S = {...S, plans:S.plans}; const d=S.trial_days; S={...S, active:true, days_left:d, expires_text:new Date(Date.now()+d*86400000).toLocaleDateString('ru-RU'), trial_available:false, key:'vless://demo-trial@nl1.kluxvpn.net:443?security=reality#KluxVPN'}; render(); toast('Демо: пробный период активирован'); confetti(); return go('keyScr'); }
   try { loading(true); S = await api('/api/trial', {}); render(); loading(false); toast('🎁 Пробный период активирован!'); confetti(); go('keyScr'); }
   catch(e){ loading(false); toast('Не получилось: ' + e.message); }
 };
@@ -703,7 +703,7 @@ let logoTaps = 0, logoT;
 $('.logo').onclick = () => {
   const i = $('.logo i'); i.classList.remove('spin3'); void i.offsetWidth; i.classList.add('spin3'); haptic('soft');
   clearTimeout(logoT); logoT = setTimeout(() => logoTaps = 0, 1500);
-  if (++logoTaps >= 5) { logoTaps = 0; confetti(); toast('🧡 Ты нашёл пасхалку! Спасибо, что ты с KlyxVPN'); }
+  if (++logoTaps >= 5) { logoTaps = 0; confetti(); toast('🧡 Ты нашёл пасхалку! Спасибо, что ты с KluxVPN'); }
 };
 
 // ---------- старт ----------

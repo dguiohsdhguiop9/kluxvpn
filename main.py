@@ -1,5 +1,5 @@
 """
-KlyxVPN — Telegram-бот + API для мини-апки.
+KluxVPN — Telegram-бот + API для мини-апки.
 
 Что умеет:
   • Меню: купить/продлить, мой ключ, инструкции, пробный период, рефералка, поддержка
@@ -237,7 +237,7 @@ async def key_for(u) -> str | None:
     if not (u and u["uuid"] and xui.configured):
         return None
     try:
-        return await xui.link(u["uuid"], u["id"], f"KlyxVPN {SERVER_NAME}")
+        return await xui.link(u["uuid"], u["id"], f"KluxVPN {SERVER_NAME}")
     except Exception as e:
         log.error("Не удалось собрать ключ: %s", e)
         return None
@@ -275,7 +275,7 @@ async def add_days(uid: int, days: int) -> tuple[bool, str | None]:
 async def make_invoice_link(plan_key: str, uid: int) -> str:
     name, stars, days = PLANS[plan_key]
     return await pay_bot.create_invoice_link(
-        title=f"KlyxVPN — {name}",
+        title=f"KluxVPN — {name}",
         description=f"Доступ к VPN на {name}. Безлимитный трафик, до {DEVICES} устройств.",
         payload=f"{plan_key}:{uid}",
         currency="XTR",
@@ -290,7 +290,7 @@ def home_text(u) -> str:
     else:
         status = "⚫️ Подписки нет"
     return (
-        "⚡️ <b>KlyxVPN</b> — быстрый и надёжный VPN\n\n"
+        "⚡️ <b>KluxVPN</b> — быстрый и надёжный VPN\n\n"
         "🔸 Современное шифрование VLESS Reality — защищённое и стабильное подключение\n"
         f"🔸 Безлимитный трафик · до {DEVICES} устройств\n"
         f"🔸 Сервер: {SERVER_NAME}\n\n"
@@ -650,7 +650,7 @@ async def cmd_menu(message: Message):
 @main_r.message(Command("help"))
 async def cmd_help(message: Message):
     lines = "\n".join(f"/{c} — {d}" for c, d in USER_COMMANDS)
-    await message.answer(f"❓ <b>Команды KlyxVPN</b>\n\n{lines}\n\nИли пользуйся кнопками внизу 👇",
+    await message.answer(f"❓ <b>Команды KluxVPN</b>\n\n{lines}\n\nИли пользуйся кнопками внизу 👇",
                          parse_mode="HTML", reply_markup=reply_kb())
 
 
@@ -686,9 +686,9 @@ async def msg_app(message: Message):
     if not webapp_url():
         return await cmd_menu(message)
     await message.answer(
-        "⚡️ Жми кнопку ниже — откроется приложение KlyxVPN",
+        "⚡️ Жми кнопку ниже — откроется приложение KluxVPN",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="⚡️ Открыть KlyxVPN", web_app=WebAppInfo(url=webapp_url()))]]),
+            InlineKeyboardButton(text="⚡️ Открыть KluxVPN", web_app=WebAppInfo(url=webapp_url()))]]),
     )
 
 
@@ -718,7 +718,7 @@ async def cmd_key(message: Message):
 @main_r.message(Command("terms"))
 async def cmd_terms(message: Message):
     text = (
-        "📄 <b>Документы KlyxVPN</b>\n\n"
+        "📄 <b>Документы KluxVPN</b>\n\n"
         "🔸 Пользовательское соглашение — условия, тарифы, оплата и возвраты\n"
         "🔸 Политика конфиденциальности — какие данные мы обрабатываем и зачем\n\n"
         f"💬 Поддержка: {support_text()}"
@@ -789,13 +789,13 @@ async def create_payment(method: str, key: str, uid: int) -> tuple[str, str | No
         return await make_invoice_link(key, uid), None
     rub = RUB_PRICES[key]
     if method == "crypto":
-        inv_id, url, _ = await crypto.create_invoice(rub, f"{key}:{uid}", f"KlyxVPN — {name}")
+        inv_id, url, _ = await crypto.create_invoice(rub, f"{key}:{uid}", f"KluxVPN — {name}")
         db.add_invoice(f"cb_{inv_id}", uid, key, "crypto", rub, "RUB")
         return url, f"cb_{inv_id}"
     if method == "sbp":
         u = db.get_user(uid)
         back = f"https://t.me/{MAIN_USERNAME}"
-        tid, url = await platega.create(rub, uid, f"KlyxVPN — {name}", f"{key}:{uid}", back, back,
+        tid, url = await platega.create(rub, uid, f"KluxVPN — {name}", f"{key}:{uid}", back, back,
                                         user_name=(u["username"] or u["name"] or "") if u else "",
                                         client_ip=(u["app_ip"] or "") if u else "")
         db.add_invoice(f"pg_{tid}", uid, key, "sbp", rub, "RUB")
@@ -803,7 +803,7 @@ async def create_payment(method: str, key: str, uid: int) -> tuple[str, str | No
     if method == "card":
         inv_id = f"ym_{uid}_{int(time.time())}"
         db.add_invoice(inv_id, uid, key, "card", rub, "RUB")
-        return yoomoney.link(rub, inv_id, f"KlyxVPN — {name}", f"https://t.me/{MAIN_USERNAME}"), inv_id
+        return yoomoney.link(rub, inv_id, f"KluxVPN — {name}", f"https://t.me/{MAIN_USERNAME}"), inv_id
     raise ValueError("unknown method")
 
 
@@ -1004,7 +1004,7 @@ async def fulfill_payment(uid: int, key: str, amount: int, currency: str, charge
         await add_days(u["referrer"], REF_BONUS_DAYS)
         try:
             await send_sticker(u["referrer"], "friends")
-            await main_bot.send_message(u["referrer"], f"🎉 Твой друг оплатил подписку — тебе +{REF_BONUS_DAYS} дн. KlyxVPN!")
+            await main_bot.send_message(u["referrer"], f"🎉 Твой друг оплатил подписку — тебе +{REF_BONUS_DAYS} дн. KluxVPN!")
         except Exception:
             pass
 
@@ -1072,7 +1072,7 @@ async def platega_loop():
 # ---------------- платёжный бот: всё остальное ----------------
 @paybot_r.message()
 async def paybot_any(message: Message):
-    await message.answer(f"Это платёжный бот KlyxVPN 💳\nВсё управление подпиской — в @{MAIN_USERNAME}")
+    await message.answer(f"Это платёжный бот KluxVPN 💳\nВсё управление подпиской — в @{MAIN_USERNAME}")
 
 
 # ---------------- админка ----------------
@@ -1115,13 +1115,13 @@ def admin_kb() -> InlineKeyboardMarkup:
 
 
 ADMIN_HELP = (
-    "🛠 <b>Админ-панель KlyxVPN</b>\n\n"
+    "🛠 <b>Админ-панель KluxVPN</b>\n\n"
     "Команды:\n"
     "<code>/user ID</code> — инфо о пользователе\n"
     "<code>/give ID ДНИ</code> — выдать/продлить подписку\n"
     "<code>/sync ID</code> — повторно отправить ключ в панель\n"
     "<code>/refund ID CHARGE_ID</code> — вернуть звёзды\n"
-    "<code>/stickers</code> — создать стикерпак KlyxVPN\n"
+    "<code>/stickers</code> — создать стикерпак KluxVPN\n"
     "<code>/icons</code> — включить свои иконки на кнопках (нужен Premium)\n"
     "<code>/logout</code> — выйти из админки"
 )
@@ -1395,7 +1395,7 @@ async def adm_user_days(call: CallbackQuery):
     await call.answer(f"{'✅' if ok else '⚠️'} {'+' if days > 0 else ''}{days} дн.", show_alert=not ok)
     if days > 0:
         u = db.get_user(uid)
-        msg = f"🎁 Тебе начислено <b>+{days} дн.</b> KlyxVPN! Подписка до {fmt_date(u['expires_at'])}"
+        msg = f"🎁 Тебе начислено <b>+{days} дн.</b> KluxVPN! Подписка до {fmt_date(u['expires_at'])}"
         if link:
             msg += f"\n\n🔑 Ключ:\n<code>{esc(link)}</code>"
         try:
@@ -1426,7 +1426,7 @@ async def adm_user_sync(call: CallbackQuery):
         await sync_user(uid)
         link = await key_for(db.get_user(uid))
         if link:
-            await main_bot.send_message(uid, f"🔑 Твой ключ KlyxVPN:\n<code>{esc(link)}</code>", parse_mode="HTML")
+            await main_bot.send_message(uid, f"🔑 Твой ключ KluxVPN:\n<code>{esc(link)}</code>", parse_mode="HTML")
         await call.answer("✅ Ключ отправлен")
     except Exception as e:
         await call.answer(f"❌ {e}"[:190], show_alert=True)
@@ -1542,7 +1542,7 @@ async def adm_csv(call: CallbackQuery):
                     datetime.fromtimestamp(u["last_seen"], MSK).strftime("%d.%m.%Y %H:%M") if u["last_seen"] else ""])
     data = ("\ufeff" + buf.getvalue()).encode("utf-8")  # BOM — чтобы Excel открыл кириллицу
     await call.message.answer_document(
-        BufferedInputFile(data, filename=f"klyxvpn_users_{datetime.now(MSK).strftime('%Y-%m-%d')}.csv"),
+        BufferedInputFile(data, filename=f"kluxvpn_users_{datetime.now(MSK).strftime('%Y-%m-%d')}.csv"),
         caption=f"📥 Все пользователи: {len(db.all_user_ids())}",
     )
 
@@ -1622,7 +1622,7 @@ async def do_give(message: Message, args: str):
     )
     if days > 0:
         try:
-            msg = f"🎁 Тебе начислено <b>+{days} дн.</b> KlyxVPN! Подписка до {fmt_date(u['expires_at'])}"
+            msg = f"🎁 Тебе начислено <b>+{days} дн.</b> KluxVPN! Подписка до {fmt_date(u['expires_at'])}"
             if link:
                 msg += f"\n\n🔑 Ключ:\n<code>{esc(link)}</code>"
             await send_screen(uid, "success", msg)
@@ -1675,7 +1675,7 @@ async def cmd_stickers(message: Message):
         await main_bot.create_new_sticker_set(
             user_id=message.from_user.id,
             name=name,
-            title="KlyxVPN 🦊",
+            title="KluxVPN 🦊",
             stickers=[InputSticker(sticker=FSInputFile(f), format="static", emoji_list=[e]) for _, e, f in files],
         )
         await load_stickers()
@@ -1707,7 +1707,7 @@ async def cmd_icons(message: Message, command: CommandObject):
         await message.answer("🎨 Создаю набор иконок…")
         try:
             await main_bot.create_new_sticker_set(
-                user_id=message.from_user.id, name=name, title="KlyxVPN icons",
+                user_id=message.from_user.id, name=name, title="KluxVPN icons",
                 sticker_type="custom_emoji",
                 stickers=[InputSticker(sticker=FSInputFile(icon_file(i)[0]), format=icon_file(i)[1],
                                        emoji_list=[ICON_EMOJI[i]]) for i in ICONS],
@@ -1758,7 +1758,7 @@ async def cmd_sync(message: Message, command: CommandObject):
         link = await key_for(db.get_user(uid))
         await message.answer("✅ Отправлено в панель")
         if link:
-            await main_bot.send_message(uid, f"🔑 Твой ключ KlyxVPN:\n<code>{esc(link)}</code>", parse_mode="HTML")
+            await main_bot.send_message(uid, f"🔑 Твой ключ KluxVPN:\n<code>{esc(link)}</code>", parse_mode="HTML")
     except Exception as e:
         await message.answer(f"❌ {esc(e)}", parse_mode="HTML")
 
@@ -1807,7 +1807,7 @@ async def reminders_loop():
                     await send_sticker(u["id"], "renew")
                     await send_screen(
                         u["id"], "plans",
-                        f"⏳ Подписка KlyxVPN закончится <b>{fmt_date(u['expires_at'])}</b> (через {days_left(u)} дн.).\nПродли, чтобы VPN не отключился 👇",
+                        f"⏳ Подписка KluxVPN закончится <b>{fmt_date(u['expires_at'])}</b> (через {days_left(u)} дн.).\nПродли, чтобы VPN не отключился 👇",
                         InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔥 Продлить", callback_data="buy")]]),
                     )
                 except Exception:
@@ -2005,7 +2005,7 @@ async def api_public(request):
 
 
 async def api_root(request):
-    return web.Response(text="KlyxVPN API ok")
+    return web.Response(text="KluxVPN API ok")
 
 
 async def start_api():
@@ -2054,7 +2054,7 @@ async def main():
     await setup_commands()
     if webapp_url():
         try:
-            await main_bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="KlyxVPN", web_app=WebAppInfo(url=webapp_url())))
+            await main_bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="KluxVPN", web_app=WebAppInfo(url=webapp_url())))
             log.info("✅ Кнопка мини-апки: %s", webapp_url())
         except Exception as e:
             log.warning("Не удалось поставить кнопку меню: %s", e)
