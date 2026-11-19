@@ -27,6 +27,11 @@ from aiogram.filters import BaseFilter, Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
     BufferedInputFile,
     CallbackQuery,
     FSInputFile,
@@ -523,8 +528,77 @@ def decorate(kb: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def edit_or_send(call: CallbackQuery, text: str, kb: InlineKeyboardMarkup, screen: str = "home"):
-    await show(call, screen, text, kb)
+class MsgCall:
+    """Позволяет вызывать обработчики кнопок из обычного сообщения (команды и нижнее меню)."""
+    def __init__(self, message: Message):
+        self.message = message
+        self.from_user = message.from_user
+        self.data = ""
+
+    async def answer(self, text: str | None = None, show_alert: bool = False, **_):
+        if text and show_alert:
+            await self.message.answer(text)
+
+
+async def edit_or_send(call, text: str, kb: InlineKeyboardMarkup, screen: str = "home"):
+    await show(call.message if isinstance(call, MsgCall) else call, screen, text, kb)
+
+
+# ---------- нижнее меню и список команд ----------
+BTN_APP, BTN_BUY, BTN_KEY = "⚡️ Открыть приложение", "🔥 Купить VPN", "🔑 Мой ключ"
+BTN_GUIDE, BTN_REF, BTN_TRIAL, BTN_SUPPORT = "📱 Подключить", "🤝 Друзья", "🎁 Бесплатно", "💬 Поддержка"
+
+
+def reply_kb() -> ReplyKeyboardMarkup:
+    rows = []
+    if webapp_url():
+        rows.append([KeyboardButton(text=BTN_APP, web_app=WebAppInfo(url=webapp_url()))])
+    rows += [
+        [KeyboardButton(text=BTN_BUY), KeyboardButton(text=BTN_KEY)],
+        [KeyboardButton(text=BTN_GUIDE), KeyboardButton(text=BTN_REF)],
+        [KeyboardButton(text=BTN_TRIAL), KeyboardButton(text=BTN_SUPPORT)],
+    ]
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True,
+                               input_field_placeholder="Выбери действие 👇")
+
+
+USER_COMMANDS = [
+    ("start", "🚀 Запустить бота"),
+    ("menu", "🏠 Главное меню"),
+    ("buy", "🔥 Купить подписку"),
+    ("key", "🔑 Мой ключ"),
+    ("trial", "🎁 Попробовать бесплатно"),
+    ("guide", "📱 Как подключить"),
+    ("ref", "🤝 Пригласить друга"),
+    ("crypto", "🪙 Как оплатить криптой"),
+    ("support", "💬 Поддержка"),
+    ("terms", "📄 Соглашение и документы"),
+    ("privacy", "🔒 Конфиденциальность"),
+    ("help", "❓ Все команды"),
+]
+ADMIN_COMMANDS = [
+    ("admin", "🛠 Админ-панель"),
+    ("user", "👤 Карточка пользователя: /user ID"),
+    ("give", "🎁 Выдать дни: /give ID дни"),
+    ("sync", "🔄 Синхронизировать с панелью"),
+    ("cancel", "✖️ Отменить действие"),
+    ("logout", "🚪 Выйти из админки"),
+]
+
+
+async def setup_commands():
+    user_cmds = [BotCommand(command=c, description=d) for c, d in USER_COMMANDS]
+    try:
+        await main_bot.set_my_commands(user_cmds, scope=BotCommandScopeDefault())
+        await main_bot.set_my_commands(user_cmds, scope=BotCommandScopeDefault(), language_code="ru")
+        for aid in {ADMIN_ID, *ADMIN_IDS}:
+            if aid:
+                await main_bot.set_my_commands(
+                    user_cmds + [BotCommand(command=c, description=d) for c, d in ADMIN_COMMANDS],
+                    scope=BotCommandScopeChat(chat_id=aid))
+        log.info("✅ Команды бота обновлены")
+    except Exception as e:
+        log.warning("Не удалось поставить команды: %s", e)
 
 
 def ensure_user(tg_user, referrer: int | None = None) -> tuple:
@@ -557,12 +631,58 @@ async def cmd_start(message: Message, command: CommandObject):
         except Exception:
             pass
     await show(message, "home", home_text(u), home_kb(u))
+    await message.answer("👇 Кнопки меню теперь всегда внизу экрана", reply_markup=reply_kb())
 
 
 @main_r.message(Command("menu"))
 async def cmd_menu(message: Message):
     u, _ = ensure_user(message.from_user)
     await show(message, "home", home_text(u), home_kb(u))
+    await message.answer("👇 Меню внизу", reply_markup=reply_kb())
+
+
+@main_r.message(Command("help"))
+async def cmd_help(message: Message):
+    lines = "\n".join(f"/{c} — {d}" for c, d in USER_COMMANDS)
+    await message.answer(f"❓ <b>Команды KlyxVPN</b>\n\n{lines}\n\nИли пользуйся кнопками внизу 👇",
+                         parse_mode="HTML", reply_markup=reply_kb())
+
+
+@main_r.message(Command("trial"))
+@main_r.message(F.text == BTN_TRIAL)
+async def msg_trial(message: Message):
+    u, _ = ensure_user(message.from_user)
+    if u["trial_used"] or not TRIAL_DAYS:
+        return await message.answer("🎁 Пробный период уже использован. Посмотри тарифы — /buy")
+    await cb_trial(MsgCall(message))
+
+
+@main_r.message(Command("guide"))
+@main_r.message(F.text == BTN_GUIDE)
+async def msg_guide(message: Message):
+    await cb_guide(MsgCall(message))
+
+
+@main_r.message(Command("ref"))
+@main_r.message(F.text == BTN_REF)
+async def msg_ref(message: Message):
+    await cb_ref(MsgCall(message))
+
+
+@main_r.message(Command("support"))
+@main_r.message(F.text == BTN_SUPPORT)
+async def msg_support(message: Message):
+    await cb_support(MsgCall(message))
+
+
+@main_r.message(F.text == BTN_BUY)
+async def msg_buy(message: Message):
+    await cmd_buy(message)
+
+
+@main_r.message(F.text == BTN_KEY)
+async def msg_key(message: Message):
+    await cmd_key(message)
 
 
 @main_r.message(Command("buy"))
@@ -1914,6 +2034,7 @@ async def main():
         except Exception as e:
             log.error("❌ Панель 3X-UI недоступна: %s", e)
 
+    await setup_commands()
     if webapp_url():
         try:
             await main_bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="KlyxVPN", web_app=WebAppInfo(url=webapp_url())))
