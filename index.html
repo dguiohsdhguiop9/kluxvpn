@@ -220,6 +220,116 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
 @keyframes rip{to{transform:scale(2.6);opacity:0}}
 .logo{cursor:pointer;user-select:none}
 .logo i.spin3{animation:spin .8s var(--ease)}
+
+/* ===== игра: взлом сервера ===== */
+.g-title{position:relative;font:800 24px Unbounded;letter-spacing:-.5px}
+.g-rules{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.g-rules div{background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:16px;padding:12px 6px;text-align:center;font-size:11.5px;color:var(--muted);line-height:1.35}
+.g-rules b{display:block;font-size:24px;margin-bottom:6px}
+.dots{display:flex;gap:6px;justify-content:flex-end}.dots i{width:24px;height:8px;border-radius:9px;background:rgba(255,255,255,.08)}.dots i.on{background:var(--grad);box-shadow:0 0 10px rgba(255,122,26,.6)}
+.hk-hero{overflow:hidden;background:linear-gradient(160deg,rgba(40,16,4,.9),rgba(12,12,12,.9));border-color:rgba(255,122,26,.3)}
+.hk-hero::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,122,26,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,122,26,.07) 1px,transparent 1px);background-size:22px 22px}
+.hk-scan{position:absolute;left:0;right:0;height:60px;top:-60px;background:linear-gradient(transparent,rgba(255,122,26,.12),transparent);animation:scan 3.5s linear infinite;pointer-events:none}
+@keyframes scan{to{top:110%}}
+.hk-tag{position:relative;font:600 11px ui-monospace,Menlo,monospace;color:#ff9a4a;letter-spacing:2px}
+.hk-title{position:relative;font:900 38px/1 Unbounded;letter-spacing:-1px;margin-top:8px;text-shadow:0 0 30px rgba(255,100,10,.35)}
+.hk-title span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hk-title,.hk-glitch{animation:glitch 4s infinite}
+@keyframes glitch{0%,92%,100%{transform:none;text-shadow:0 0 30px rgba(255,100,10,.35)}93%{transform:translate(-3px,1px);text-shadow:3px 0 #ff3d00,-3px 0 #ffd2a0}95%{transform:translate(3px,-1px);text-shadow:-3px 0 #ff3d00,3px 0 #ffd2a0}97%{transform:translate(-1px,0)}}
+.hk-term{position:relative;font:500 12px/1.6 ui-monospace,Menlo,monospace;color:#ffb978;margin-top:12px;min-height:58px;white-space:pre-wrap;opacity:.9}
+.hk-term::after{content:"▌";animation:blink 1s steps(1) infinite;color:#ff7a1a}
+@keyframes blink{50%{opacity:0}}
+
+.arena{position:fixed;inset:0;z-index:35;display:none;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;cursor:pointer}
+.arena.open{display:block}
+.arena.hk{background:radial-gradient(ellipse at 50% 40%,#2a1204 0%,#0a0503 45%,#030303 80%)}
+.hk-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,122,26,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(255,122,26,.08) 1px,transparent 1px);background-size:30px 30px;
+  -webkit-mask-image:radial-gradient(circle at 50% 42%,#000 10%,transparent 70%);mask-image:radial-gradient(circle at 50% 42%,#000 10%,transparent 70%);animation:gridmove 6s linear infinite}
+@keyframes gridmove{to{background-position:0 30px}}
+.hk-flash{position:absolute;inset:0;pointer-events:none;opacity:0;z-index:4}
+.hk-flash.ok{animation:flash .35s ease-out;background:radial-gradient(circle at 50% 42%,rgba(255,150,40,.45),transparent 60%)}
+.hk-flash.bad{animation:flash .45s ease-out;background:radial-gradient(circle at 50% 42%,rgba(255,30,30,.5),rgba(120,0,0,.25) 70%)}
+@keyframes flash{from{opacity:1}to{opacity:0}}
+.arena .hud{position:absolute;top:calc(14px + env(safe-area-inset-top));left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;z-index:3}
+.hud .pill{flex:1;background:rgba(20,20,20,.75);border:1px solid var(--line2);border-radius:16px;padding:9px 6px;font:800 19px Unbounded;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);text-align:center}
+.hud .pill small{display:block;font:700 9.5px Manrope;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:2px}
+.hud .pill em{font:700 11px Manrope;color:var(--muted);font-style:normal}
+.hud .pill.t{color:#ffb978}
+.hud .pill.lives span{font-size:15px;letter-spacing:2px}
+.lock-wrap{position:absolute;left:50%;top:44%;width:min(86vw,340px);aspect-ratio:1;transform:translate(-50%,-50%);z-index:2}
+#lock{width:100%;height:100%;overflow:visible}
+.lock-core{position:absolute;left:50%;top:50%;width:44%;height:44%;transform:translate(-50%,-50%);border-radius:50%;
+  background:radial-gradient(circle at 50% 30%,#2a2a2a,#0e0e0e 70%);border:1px solid var(--line2);box-shadow:inset 0 2px 0 rgba(255,255,255,.06),0 0 40px rgba(0,0,0,.6);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;transition:transform .15s,box-shadow .3s}
+.lock-core.ok{transform:translate(-50%,-50%) scale(1.08);box-shadow:0 0 60px rgba(255,122,26,.7),inset 0 0 30px rgba(255,122,26,.4)}
+.lock-core.bad{box-shadow:0 0 60px rgba(255,40,40,.7),inset 0 0 30px rgba(255,40,40,.4)}
+.lc-l{font:700 10px Manrope;letter-spacing:2px;color:var(--muted)}
+.lc-n{font:900 44px/1 Unbounded;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lc-s{font:700 10px ui-monospace,Menlo,monospace;letter-spacing:1.5px;color:#ff9a4a;margin-top:4px}
+.hk-log{position:absolute;left:16px;right:16px;bottom:calc(64px + env(safe-area-inset-bottom));height:96px;overflow:hidden;font:500 11.5px/1.55 ui-monospace,Menlo,monospace;color:#ffb978;z-index:2;
+  -webkit-mask-image:linear-gradient(transparent,#000 40%);mask-image:linear-gradient(transparent,#000 40%);display:flex;flex-direction:column;justify-content:flex-end}
+.hk-log .e{color:#ff6b6b}.hk-log .g{color:#ffe08a}
+.hk-hint{position:absolute;left:0;right:0;bottom:calc(26px + env(safe-area-inset-bottom));text-align:center;font:700 10.5px Manrope;letter-spacing:1.5px;color:var(--dim);z-index:2;animation:blink 1.6s steps(1) infinite}
+.float{position:absolute;font:800 26px Unbounded;pointer-events:none;z-index:5;animation:up .9s ease-out forwards;transform:translate(-50%,-50%);text-shadow:0 0 20px rgba(255,122,26,.8)}
+@keyframes up{to{transform:translate(-50%,-160%);opacity:0}}
+.arena.shake{animation:shake .35s}
+@keyframes shake{20%{transform:translate(-10px,2px)}40%{transform:translate(9px,-2px)}60%{transform:translate(-6px,1px)}80%{transform:translate(4px,0)}}
+.count{position:absolute;inset:0;display:grid;place-items:center;font:900 110px Unbounded;z-index:6;pointer-events:none}
+.count span{animation:cnt .9s ease-out forwards;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.count span.sm{font-size:40px;letter-spacing:2px}
+@keyframes cnt{from{transform:scale(1.8);opacity:0}30%{transform:scale(1);opacity:1}to{transform:scale(.8);opacity:0}}
+.result{position:absolute;inset:0;z-index:7;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;background:rgba(5,5,5,.78);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);cursor:default}
+.result.show{display:flex;animation:rise .5s var(--ease)}
+.result .big{font:900 60px Unbounded;letter-spacing:-2px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 30px rgba(255,122,26,.5))}
+.result .btn{max-width:320px}
+.result .stamp{font:800 13px ui-monospace,Menlo,monospace;letter-spacing:3px;padding:6px 14px;border:2px solid;border-radius:8px;margin-bottom:16px;transform:rotate(-4deg)}
+
+/* ===== колесо, серия, топ ===== */
+.wheel-box{position:relative;width:270px;height:270px;margin:6px auto 4px}
+.wheel-box .glow{position:absolute;inset:-20px;border-radius:50%;background:radial-gradient(circle,rgba(255,122,26,.35),transparent 65%)}
+#wheel{position:absolute;inset:0;transition:transform 4.8s cubic-bezier(.12,.75,.12,1);filter:drop-shadow(0 10px 30px rgba(0,0,0,.6))}
+.w-pin{position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-top:30px solid #fff;filter:drop-shadow(0 0 10px rgba(255,122,26,.9));z-index:2}
+.w-hub{position:absolute;left:50%;top:50%;width:66px;height:66px;transform:translate(-50%,-50%);border-radius:50%;background:var(--grad);display:grid;place-items:center;font:800 18px Unbounded;color:#1a0800;box-shadow:0 0 30px rgba(255,100,10,.7),inset 0 2px 0 rgba(255,255,255,.4);z-index:2}
+.streak{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px}
+.streak div{position:relative;aspect-ratio:1/1.15;border-radius:14px;background:rgba(0,0,0,.35);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;color:var(--muted);font-weight:700}
+.streak div b{font:800 14px Unbounded;color:var(--dim)}
+.streak div.done{background:linear-gradient(160deg,rgba(255,122,26,.35),rgba(255,77,0,.12));border-color:rgba(255,122,26,.55);color:#ffcf9f}
+.streak div.done b{color:#fff}
+.streak div.next{border-color:#ff7a1a;border-style:dashed}
+.streak div.gift::after{content:"🎁";position:absolute;top:-8px;right:-4px;font-size:15px}
+.top-row{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+.top-row:last-child{border:none}
+.top-row .n{width:28px;text-align:center;font:800 14px Unbounded;color:var(--muted)}
+.top-row.r1 .n{color:#ffd75a}.top-row.r2 .n{color:#e3e3e3}.top-row.r3 .n{color:#ff9d5c}
+.top-row .nm{flex:1;font-weight:700}
+.top-row .sc{font:800 16px Unbounded;color:#ffb978}
+.top-row.me{background:rgba(255,122,26,.1);border-radius:12px;padding-left:8px;padding-right:8px}
+
+/* ===== хаб бонусов ===== */
+.back{background:var(--glass2);border:1px solid var(--line2);color:var(--text);font:700 14px Manrope;padding:9px 16px;border-radius:999px;cursor:pointer;margin-top:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.back:active{transform:scale(.96)}
+.tile{display:flex;align-items:center;gap:14px;cursor:pointer;overflow:hidden;padding:18px 16px;transition:transform .2s var(--ease)}
+.tile:active{transform:scale(.98)}
+.tile-hack{background:linear-gradient(135deg,rgba(48,18,4,.92),rgba(14,14,14,.92));border-color:rgba(255,122,26,.35)}
+.tile-hack::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,122,26,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,122,26,.07) 1px,transparent 1px);background-size:18px 18px}
+.tile-wheel{background:linear-gradient(135deg,rgba(60,30,6,.9),rgba(14,14,14,.92));border-color:rgba(255,180,90,.3)}
+.tile-art{position:relative;flex:none;width:86px;height:86px;filter:drop-shadow(0 0 18px rgba(255,122,26,.45))}
+.tile-art svg{width:100%;height:100%}
+.tile-cur{transform-origin:50px 50px;animation:spin 1.6s linear infinite}
+.tile-spin{animation:spin 9s linear infinite}
+.tile-pin{position:absolute;top:-4px;left:50%;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent;border-top:12px solid #fff}
+.tile-body{position:relative;flex:1;min-width:0}
+.tile-tag{font:700 10px ui-monospace,Menlo,monospace;letter-spacing:1.5px;color:#ff9a4a}
+.tile-title{font:800 20px Unbounded;letter-spacing:-.4px;margin:4px 0}
+.tile-sub{font-size:13px;color:var(--muted)}
+.tile-sub b{color:#ffb978}
+.tile .chev{position:relative;font-size:28px}
+.wheel-box.big{width:300px;height:300px}
+.prizes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.prizes div{background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:14px;padding:10px 4px;text-align:center}
+.prizes b{display:block;font:800 15px Unbounded}
+.prizes span{font-size:10.5px;color:var(--muted)}
+.prizes .rare{border-color:rgba(255,215,90,.5)}.prizes .rare b{color:#ffd75a}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -326,6 +436,90 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
     </div>
   </section>
 
+  <!-- GAME HUB -->
+  <section class="screen" id="game">
+    <h2>Бонусы</h2>
+    <p class="sub">Играй каждый день — получай время подписки бесплатно</p>
+    <div class="card tile tile-hack" data-open="hackScr">
+      <div class="hk-scan"></div>
+      <div class="tile-art"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="9"/>
+        <path d="M50 12 A38 38 0 0 1 82 30" fill="none" stroke="url(#tg1)" stroke-width="9"/><defs><linearGradient id="tg1"><stop offset="0" stop-color="#ffd2a0"/><stop offset="1" stop-color="#ff4d00"/></linearGradient></defs>
+        <g class="tile-cur"><line x1="50" y1="6" x2="50" y2="22" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></g>
+        <text x="50" y="57" text-anchor="middle" font-family="Unbounded" font-weight="900" font-size="20" fill="#ff8a2a">7</text></svg></div>
+      <div class="tile-body">
+        <div class="tile-tag">ИГРА · ДО 40 МИН</div>
+        <div class="tile-title">Взлом сервера</div>
+        <div class="tile-sub" id="tHackSub">Попыток сегодня: 3</div>
+      </div>
+      <span class="chev">›</span>
+    </div>
+    <div class="card tile tile-wheel" data-open="wheelScr">
+      <div class="tile-art"><svg viewBox="0 0 100 100" class="tile-spin"><g id="tileWheel"></g></svg><div class="tile-pin"></div></div>
+      <div class="tile-body">
+        <div class="tile-tag">РАЗ В ДЕНЬ · ДО 3 Ч</div>
+        <div class="tile-title">Колесо удачи</div>
+        <div class="tile-sub" id="tWheelSub">Доступно сейчас</div>
+      </div>
+      <span class="chev">›</span>
+    </div>
+    <div class="card">
+      <div class="row"><b class="sec-title">Сегодня ты добыл</b><b class="g-title" id="hubToday" style="font-size:20px">+0 мин</b></div>
+      <div class="bar" style="margin:12px 0 8px"><i id="hubBar"></i></div>
+      <div class="srv-sub" id="hubSub">🔥 Серия: 0 дн. · крути колесо каждый день</div>
+    </div>
+  </section>
+
+  <!-- HACK GAME -->
+  <section class="screen" id="hackScr">
+    <button class="back" data-back>‹ Бонусы</button>
+    <div class="card hk-hero" style="margin-top:12px">
+      <div class="hk-scan"></div>
+      <div class="hk-tag">KLUX://SECURITY_LAB</div>
+      <div class="hk-title">ВЗЛОМ<br><span>СЕРВЕРА</span></div>
+      <div class="hk-term" id="hkIdle"></div>
+      <div class="row" style="position:relative;margin-top:14px">
+        <div><div class="g-title" id="gToday" style="margin:0;font-size:20px;text-align:left">+0 мин сегодня</div><div class="srv-sub" id="gSub">Максимум 2 ч в день</div></div>
+        <div style="text-align:right"><div class="dots" id="gDots"></div><div class="srv-sub" style="margin-top:6px" id="gBest">рекорд: —</div></div>
+      </div>
+      <div class="bar" style="margin:14px 0 14px;position:relative"><i id="gBar"></i></div>
+      <button class="btn" id="gPlay" style="position:relative">▶ Начать взлом</button>
+    </div>
+    <div class="card">
+      <b class="sec-title" style="display:block;margin-bottom:12px">Как взламывать</b>
+      <div class="g-rules">
+        <div><b>🎯</b>Тапни, когда курсор<br>в уязвимости<br><span style="color:#ffb978">+3 мин</span></div>
+        <div><b>⚡</b>Точно в центр<br>— идеально<br><span style="color:#ffd75a">+1 бонус</span></div>
+        <div><b>🛡</b>3 промаха —<br>тебя засекли<br><span style="color:#ff5b5b">конец</span></div>
+      </div>
+      <div class="srv-sub" style="margin-top:12px;text-align:center">Каждый слой защиты быстрее и уже · попытки обновляются в 00:00 МСК</div>
+    </div>
+    <div class="card">
+      <div class="row"><b class="sec-title">🏆 Топ хакеров дня</b><span class="srv-sub" id="tMe"></span></div>
+      <div id="topList" style="margin-top:8px"><div class="srv-sub">Пока никто не взламывал — стань первым!</div></div>
+    </div>
+  </section>
+
+  <!-- WHEEL -->
+  <section class="screen" id="wheelScr">
+    <button class="back" data-back>‹ Бонусы</button>
+    <h2>Колесо удачи</h2>
+    <p class="sub">Один бесплатный спин каждый день</p>
+    <div class="card wheel-card">
+      <div class="row"><b class="sec-title">🎡 Твой спин</b><span class="badge" id="wBadge">1 раз в день</span></div>
+      <div class="wheel-box big"><div class="glow"></div><div class="w-pin"></div><svg id="wheel" viewBox="0 0 270 270"></svg><div class="w-hub">K</div></div>
+      <button class="btn" id="wSpin" style="margin-top:14px">Крутить колесо</button>
+    </div>
+    <div class="card">
+      <div class="row"><b class="sec-title">🔥 Серия дней</b><span class="srv-sub" id="sText">0 дн. подряд</span></div>
+      <div class="streak" id="streak"></div>
+      <div class="srv-sub" style="margin-top:10px;text-align:center">Крути каждый день: на 3-й день <b style="color:#ffb978">+30 мин</b>, на 7-й — <b style="color:#ffb978">+1 день</b>. Пропустил день — серия сгорает</div>
+    </div>
+    <div class="card">
+      <b class="sec-title" style="display:block;margin-bottom:10px">Призы</b>
+      <div class="prizes" id="prizeList"></div>
+    </div>
+  </section>
+
   <!-- PROFILE -->
   <section class="screen" id="profile">
     <h2>Профиль</h2>
@@ -363,6 +557,7 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
 <nav>
   <button class="active" data-go="home"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>VPN</button>
   <button data-go="plans"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>Тарифы</button>
+  <button data-go="game"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="12" rx="5"/><path d="M7 11v4M5 13h4"/><circle cx="16" cy="12" r="1" fill="currentColor"/><circle cx="18" cy="15" r="1" fill="currentColor"/></svg>Бонусы</button>
   <button data-go="keyScr"><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/></svg>Ключ</button>
   <button data-go="profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Профиль</button>
 </nav>
@@ -375,6 +570,34 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
 </div>
 <div class="sheet" id="paySheet"><div class="grab"></div><div id="payBody"></div></div>
 <div class="toast" id="toast"></div>
+<div class="arena hk" id="arena">
+  <div class="hk-grid"></div><div class="hk-scan"></div><div class="hk-flash" id="hkFlash"></div>
+  <div class="hud">
+    <div class="pill"><small>Слой</small><span id="aLevel">1</span></div>
+    <div class="pill lives"><small>Защита</small><span id="aLives">🛡🛡🛡</span></div>
+    <div class="pill t"><small>Добыто</small><span id="aScore">0</span><em> мин</em></div>
+  </div>
+  <div class="lock-wrap">
+    <svg id="lock" viewBox="0 0 300 300">
+      <defs>
+        <linearGradient id="hkg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd2a0"/><stop offset=".5" stop-color="#ff7a1a"/><stop offset="1" stop-color="#ff4d00"/></linearGradient>
+        <filter id="hkb" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+      </defs>
+      <circle cx="150" cy="150" r="138" fill="none" stroke="rgba(255,140,40,.25)" stroke-width="1.5" stroke-dasharray="2 8"/>
+      <g id="lkTicks"></g>
+      <circle cx="150" cy="150" r="112" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="22"/>
+      <path id="lkZoneGlow" fill="none" stroke="#ff7a1a" stroke-width="22" filter="url(#hkb)" opacity=".9"/>
+      <path id="lkZone" fill="none" stroke="url(#hkg)" stroke-width="22"/>
+      <path id="lkPerfect" fill="none" stroke="#fff3e6" stroke-width="22" opacity=".85"/>
+      <g id="lkCursor"><line x1="150" y1="22" x2="150" y2="62" stroke="#fff" stroke-width="5" stroke-linecap="round"/><circle cx="150" cy="38" r="9" fill="#fff" filter="url(#hkb)" opacity=".8"/></g>
+    </svg>
+    <div class="lock-core" id="lkCore"><div class="lc-l">СЛОЙ</div><div class="lc-n" id="lkNum">1</div><div class="lc-s" id="lkState">LOCKED</div></div>
+  </div>
+  <div class="hk-log" id="hkLog"></div>
+  <div class="hk-hint" id="hkHint">ТАПНИ В ЛЮБОМ МЕСТЕ, КОГДА КУРСОР В ОРАНЖЕВОЙ ЗОНЕ</div>
+  <div class="count" id="aCount"></div>
+  <div class="result" id="aResult"></div>
+</div>
 <canvas id="confetti"></canvas>
 <div class="loading hide" id="loading"><div class="spin">K</div></div>
 
@@ -446,6 +669,9 @@ function render(){
   $('#featDev').textContent = `До ${S.devices} устройств на ключ`;
 
   renderPlans();
+  renderGame();
+  renderWheel();
+  renderHub();
 
   $('#keyBadge').textContent = a ? 'Активен' : 'Неактивен';
   $('#keyBadge').classList.toggle('on', a);
@@ -705,6 +931,259 @@ $('.logo').onclick = () => {
   clearTimeout(logoT); logoT = setTimeout(() => logoTaps = 0, 1500);
   if (++logoTaps >= 5) { logoTaps = 0; confetti(); toast('🧡 Ты нашёл пасхалку! Спасибо, что ты с KluxVPN'); }
 };
+
+
+// ---------- мини-игра «Взлом сервера» ----------
+const GDEMO = {allowed:true, reason:'', rounds_left:3, rounds:3, minutes_today:0, daily_cap:120, round_cap:40, best:0};
+function G(){ return S.game || GDEMO; }
+function renderGame(){
+  const g = G();
+  const h = Math.floor(g.minutes_today/60), m = g.minutes_today%60;
+  $('#gToday').textContent = '+' + (h ? h + ' ч ' : '') + m + ' мин сегодня';
+  $('#gSub').textContent = `до ${g.round_cap} мин за взлом · до ${Math.round(g.daily_cap/60*10)/10} ч в день`;
+  $('#gBar').style.width = Math.min(100, g.minutes_today / g.daily_cap * 100) + '%';
+  $('#gDots').innerHTML = Array.from({length:g.rounds}, (_, i) => `<i class="${i < g.rounds_left ? 'on' : ''}"></i>`).join('');
+  $('#gBest').textContent = 'рекорд: ' + (g.best ? g.best + ' ⚡' : '—');
+  const done = g.rounds_left <= 0 || g.minutes_today >= g.daily_cap;
+  const btn = $('#gPlay');
+  if (!g.allowed){ btn.textContent = '🔒 Нужна активная подписка'; btn.dataset.mode = 'buy'; }
+  else if (done){ btn.textContent = '🌙 Доступ закрыт до завтра'; btn.dataset.mode = 'done'; }
+  else { btn.textContent = `▶ Начать взлом · попыток ${g.rounds_left}`; btn.dataset.mode = 'play'; }
+}
+
+// печатающийся терминал на карточке
+(function idleTerm(){
+  const lines = ['> connect klux-node-07 ...', '> scanning ports ......... OK', '> encryption: 7 layers detected', '> ready_'];
+  let li = 0, ci = 0, out = '';
+  (function step(){
+    const el = $('#hkIdle'); if (!el) return;
+    if (li >= lines.length){ setTimeout(() => { li = 0; ci = 0; out = ''; step(); }, 2600); return; }
+    out += lines[li][ci++] || ''; el.textContent = out;
+    if (ci > lines[li].length){ out += '\n'; li++; ci = 0; setTimeout(step, 380); } else setTimeout(step, 28 + Math.random()*40);
+  })();
+})();
+
+const arena = $('#arena');
+const H = {run:false, level:1, lives:3, score:0, perfects:0, ang:0, dir:1, speed:150, zone:0, width:44, last:0, lock:false, token:null, raf:0};
+const deg2xy = (a, r) => [150 + r*Math.sin(a*Math.PI/180), 150 - r*Math.cos(a*Math.PI/180)];
+function arcPath(c, w, r=112){ const [x0,y0] = deg2xy(c - w/2, r), [x1,y1] = deg2xy(c + w/2, r); return `M${x0} ${y0} A${r} ${r} 0 ${w > 180 ? 1 : 0} 1 ${x1} ${y1}`; }
+const angDist = (a, b) => { let d = Math.abs(((a - b) % 360 + 360) % 360); return d > 180 ? 360 - d : d; };
+(function ticks(){ let t=''; for (let i=0;i<60;i++){ const [x0,y0]=deg2xy(i*6,128), [x1,y1]=deg2xy(i*6,i%5?132:136); t+=`<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="rgba(255,150,60,${i%5?.25:.6})" stroke-width="${i%5?1:2}"/>`; } $('#lkTicks').innerHTML=t; })();
+
+function hkLog(t, cls=''){ const d = document.createElement('div'); d.textContent = t; if (cls) d.className = cls; const l = $('#hkLog'); l.appendChild(d); while (l.children.length > 7) l.firstChild.remove(); }
+function hkFlash(k){ const f = $('#hkFlash'); f.className = 'hk-flash'; void f.offsetWidth; f.className = 'hk-flash ' + k; }
+function floatText(t, c){ const f = document.createElement('div'); f.className = 'float'; f.textContent = t; f.style.cssText += `left:50%;top:44%;color:${c}`; arena.appendChild(f); setTimeout(() => f.remove(), 900); }
+function hud(){ $('#aLevel').textContent = H.level; $('#lkNum').textContent = H.level; $('#aScore').textContent = H.score; $('#aLives').textContent = '🛡'.repeat(H.lives) + '·'.repeat(3 - H.lives); }
+function newZone(){
+  H.width = Math.max(13, 46 - (H.level - 1) * 2.6);
+  H.speed = Math.min(430, 140 + (H.level - 1) * 20);
+  let z; do { z = Math.random() * 360; } while (angDist(z, H.ang) < 100);
+  H.zone = z;
+  $('#lkZone').setAttribute('d', arcPath(z, H.width)); $('#lkZoneGlow').setAttribute('d', arcPath(z, H.width));
+  $('#lkPerfect').setAttribute('d', arcPath(z, Math.max(3, H.width / 3.2)));
+}
+function frame(t){
+  if (!H.run) return;
+  const dt = Math.min(.05, (t - H.last) / 1000); H.last = t;
+  H.ang = (H.ang + H.dir * H.speed * dt + 360) % 360;
+  $('#lkCursor').setAttribute('transform', `rotate(${H.ang} 150 150)`);
+  H.raf = requestAnimationFrame(frame);
+}
+function hit(){
+  if (!H.run || H.lock) return;
+  const d = angDist(H.ang, H.zone), core = $('#lkCore');
+  core.classList.remove('ok','bad'); void core.offsetWidth;
+  if (d <= H.width / 2){
+    const perfect = d <= H.width / 6.4;
+    const gain = 3 + (perfect ? 1 : 0);
+    H.score += gain; if (perfect) H.perfects++;
+    hkLog(`> layer ${String(H.level).padStart(2,'0')} cracked ${perfect ? '★ PERFECT' : '.... OK'}  +${gain}`, perfect ? 'g' : '');
+    floatText('+' + gain, perfect ? '#ffe08a' : '#ffb978');
+    core.classList.add('ok'); hkFlash('ok'); haptic(perfect ? 'heavy' : 'medium');
+    $('#lkState').textContent = perfect ? 'PERFECT' : 'CRACKED';
+    H.level++; H.dir *= -1; hud(); newZone();
+    setTimeout(() => $('#lkState').textContent = 'LOCKED', 450);
+  } else {
+    H.lives--; hud();
+    hkLog(`> ALERT: intrusion detected [${3 - H.lives}/3]`, 'e');
+    core.classList.add('bad'); hkFlash('bad'); arena.classList.remove('shake'); void arena.offsetWidth; arena.classList.add('shake');
+    try{ tg.HapticFeedback.notificationOccurred('error') }catch(_){}
+    $('#lkState').textContent = 'DETECTED';
+    H.lock = true; setTimeout(() => { H.lock = false; if (H.run) $('#lkState').textContent = 'LOCKED'; }, 350);
+    if (H.lives <= 0) return gameEnd();
+  }
+}
+arena.addEventListener('pointerdown', e => { if (e.target.closest('.result')) return; e.preventDefault(); hit(); });
+
+async function gameStart(){
+  const mode = $('#gPlay').dataset.mode;
+  if (mode === 'buy') return go('plans');
+  if (mode === 'done') return toast('Попытки закончились — новые будут завтра 🧡');
+  if (NO_AUTH) return needAuth();
+  haptic('medium');
+  if (LIVE){
+    try { loading(true); const r = await api('/api/game/start', {}); H.token = r.token; S.game = r.game; loading(false); }
+    catch(e){ loading(false); return toast(e.message); }
+  } else { GDEMO.rounds_left--; }
+  renderGame();
+  Object.assign(H, {run:false, level:1, lives:3, score:0, perfects:0, ang:0, dir:1, lock:false});
+  $('#hkLog').innerHTML = ''; $('#aResult').classList.remove('show'); $('#lkState').textContent = 'LOCKED';
+  newZone(); hud(); $('#lkCursor').setAttribute('transform', 'rotate(0 150 150)');
+  arena.classList.add('open');
+  hkLog('> establishing connection...');
+  for (const n of ['3','2','1','HACK']){
+    $('#aCount').innerHTML = `<span class="${n.length > 1 ? 'sm' : ''}">${n}</span>`; haptic('soft');
+    await new Promise(r => setTimeout(r, n.length > 1 ? 550 : 700));
+  }
+  $('#aCount').innerHTML = ''; hkLog('> access point found. go!', 'g');
+  H.run = true; H.last = performance.now(); H.raf = requestAnimationFrame(frame);
+}
+
+async function gameEnd(){
+  H.run = false; cancelAnimationFrame(H.raf);
+  hkLog('> connection terminated', 'e');
+  await new Promise(r => setTimeout(r, 500));
+  let minutes = 0, err = '', rank = null;
+  if (LIVE){
+    try { const r = await api('/api/game/finish', {token: H.token, score: H.score}); minutes = r.minutes; rank = r.rank; S = r.me; render(); }
+    catch(e){ err = e.message; }
+  } else {
+    const g = GDEMO; minutes = Math.max(0, Math.min(H.score, g.round_cap, g.daily_cap - g.minutes_today)); g.minutes_today += minutes; g.best = Math.max(g.best, H.score);
+  }
+  renderGame(); renderHub();
+  const g = G(), layers = H.level - 1, capped = minutes < H.score && !err;
+  const good = layers >= 5;
+  $('#aResult').innerHTML = `
+    <div class="stamp" style="color:${good ? '#ffb978' : '#ff6b6b'};border-color:${good ? '#ff7a1a' : '#ff4d4d'}">${good ? 'ACCESS GRANTED' : 'ACCESS DENIED'}</div>
+    <div style="font-size:14px;color:var(--muted);font-weight:700">Взломано слоёв: ${layers} · идеальных: ${H.perfects}</div>
+    <div class="big">+${minutes} мин</div>
+    <div class="srv-sub" style="margin:8px 0 22px;font-size:14px;line-height:1.5">${err ? 'Не удалось начислить: ' + err
+      : minutes ? (LIVE ? 'Уже добавлено к подписке 🧡' : 'Демо-режим: в боте время добавится к подписке')
+      : 'Защита устояла — попробуй ещё!'}${rank ? `<br>🏆 Ты на <b style="color:#ffb978">${rank} месте</b> в топе дня` : ''}${capped ? '<br>Сработал лимит: до ' + g.round_cap + ' мин за взлом и ' + g.daily_cap + ' мин в день' : ''}</div>
+    ${g.allowed && g.rounds_left > 0 && g.minutes_today < g.daily_cap ? `<button class="btn" id="gAgain">▶ Ещё взлом · попыток ${g.rounds_left}</button>` : ''}
+    <button class="btn ghost" id="gClose" style="margin-top:8px">Готово</button>`;
+  $('#aResult').classList.add('show');
+  if (minutes) confetti();
+  $('#gClose').onclick = () => { arena.classList.remove('open'); haptic(); loadTop(); };
+  const again = $('#gAgain'); if (again) again.onclick = () => gameStart();
+}
+$('#gPlay').onclick = gameStart;
+
+// ---------- колесо удачи ----------
+const WDEMO = {allowed:true, spun_today:false, today_prize:0, prizes:[10,15,20,30,45,60,120,180], streak:2, cycle_day:2, next_day:3, bonuses:{'3':30,'7':1440}};
+function W(){ return S.wheel || WDEMO; }
+const fmtMin = m => m >= 1440 ? (m/1440) + ' д' : m >= 60 ? (m/60) + ' ч' : m + ' м';
+const fmtLong = m => m >= 1440 ? (m/1440) + ' дн.' : m >= 60 ? (m/60) + ' ч' : m + ' мин';
+let wheelRot = 0;
+function drawWheel(){
+  const pr = W().prizes, n = pr.length, R = 130, c = 135;
+  let h = '<defs><radialGradient id="wg1" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ff9a3c"/><stop offset="1" stop-color="#e04a00"/></radialGradient>'
+        + '<radialGradient id="wg2" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2a2a2a"/><stop offset="1" stop-color="#121212"/></radialGradient></defs>'
+        + `<circle cx="${c}" cy="${c}" r="${R+4}" fill="#0a0a0a" stroke="rgba(255,140,40,.6)" stroke-width="3"/>`;
+  for (let i = 0; i < n; i++){
+    const a0 = (i/n)*2*Math.PI - Math.PI/2, a1 = ((i+1)/n)*2*Math.PI - Math.PI/2;
+    const x0 = c + R*Math.cos(a0), y0 = c + R*Math.sin(a0), x1 = c + R*Math.cos(a1), y1 = c + R*Math.sin(a1);
+    h += `<path d="M${c} ${c} L${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1} Z" fill="url(#${i%2?'wg2':'wg1'})" stroke="#050505" stroke-width="2"/>`;
+    const am = (a0 + a1)/2, tx = c + R*.66*Math.cos(am), ty = c + R*.66*Math.sin(am), deg = am*180/Math.PI + 90;
+    const big = pr[i] >= 120;
+    h += `<text x="${tx}" y="${ty}" transform="rotate(${deg} ${tx} ${ty})" text-anchor="middle" dominant-baseline="middle" font-family="Unbounded" font-weight="800" font-size="${big?17:15}" fill="${i%2 ? (big?'#ffd75a':'#ffb978') : '#fff'}">${fmtMin(pr[i])}</text>`;
+  }
+  for (let i = 0; i < 24; i++){ const a = i/24*2*Math.PI; h += `<circle cx="${c+(R+1)*Math.cos(a)}" cy="${c+(R+1)*Math.sin(a)}" r="2.2" fill="${i%2?'#ffd2a0':'#ff7a1a'}"/>`; }
+  $('#wheel').innerHTML = h;
+}
+function renderWheel(){
+  const w = W();
+  if (!$('#wheel').innerHTML) drawWheel();
+  const b = $('#wSpin');
+  if (!w.allowed){ b.textContent = '🔒 Нужна активная подписка'; b.dataset.mode = 'buy'; }
+  else if (w.spun_today){ b.textContent = `✅ Сегодня +${fmtLong(w.today_prize)} · завтра снова`; b.dataset.mode = 'done'; }
+  else { b.textContent = '🎡 Крутить колесо'; b.dataset.mode = 'spin'; }
+  $('#wBadge').textContent = w.spun_today ? 'Завтра снова' : '1 раз в день';
+  $('#wBadge').classList.toggle('on', !w.spun_today && w.allowed);
+  $('#sText').textContent = `${w.streak} дн. подряд`;
+  const filled = w.spun_today ? w.cycle_day : (w.next_day - 1);
+  $('#streak').innerHTML = Array.from({length:7}, (_, i) => {
+    const d = i + 1, cls = [d <= filled ? 'done' : '', (!w.spun_today && d === w.next_day) ? 'next' : '', w.bonuses[d] ? 'gift' : ''].join(' ');
+    return `<div class="${cls}"><b>${d}</b>${w.bonuses[d] ? '+' + fmtMin(w.bonuses[d]) : 'день'}</div>`;
+  }).join('');
+}
+$('#wSpin').onclick = async () => {
+  const mode = $('#wSpin').dataset.mode;
+  if (mode === 'buy') return go('plans');
+  if (mode === 'done') return toast('Колесо уже крутил сегодня — приходи завтра 🧡');
+  if (mode === 'spinning') return;
+  if (NO_AUTH) return needAuth();
+  haptic('medium');
+  let r;
+  if (LIVE){
+    try { $('#wSpin').dataset.mode = 'spinning'; r = await api('/api/wheel/spin', {}); }
+    catch(e){ $('#wSpin').dataset.mode = 'spin'; return toast(e.message); }
+  } else {
+    const weights = [30,25,18,13,7,5,1.5,.5]; let x = Math.random()*100, idx = 0; while ((x -= weights[idx]) > 0) idx++;
+    const streak = WDEMO.streak + 1, cyc = (streak-1)%7+1, bonus = WDEMO.bonuses[cyc] || 0;
+    WDEMO.streak = streak; WDEMO.cycle_day = cyc; WDEMO.next_day = cyc%7+1; WDEMO.spun_today = true; WDEMO.today_prize = WDEMO.prizes[idx];
+    r = {index: idx, prize: WDEMO.prizes[idx], bonus, streak};
+  }
+  $('#wSpin').dataset.mode = 'spinning'; $('#wSpin').textContent = 'Крутится…';
+  const n = W().prizes.length, seg = 360/n, jitter = (Math.random() - .5) * seg * .6;
+  wheelRot += 360*6 + (360 - (wheelRot % 360)) - (r.index*seg + seg/2) + jitter;
+  $('#wheel').style.transform = `rotate(${wheelRot}deg)`;
+  let ticks = 0; const tick = setInterval(() => { if (ticks++ < 22) haptic('soft'); else clearInterval(tick); }, 180);
+  setTimeout(() => {
+    if (r.me){ S = r.me; S.wheel = r.wheel; render(); } else { renderWheel(); renderHub(); }
+    confetti();
+    toast(`🎉 +${fmtLong(r.prize)} к подписке!` + (r.bonus ? ` И бонус серии +${fmtLong(r.bonus)}` : ''));
+    if (r.bonus) setTimeout(() => toast(`🔥 ${r.streak}-й день подряд — бонус +${fmtLong(r.bonus)}!`), 2600);
+  }, 5000);
+};
+
+// ---------- топ дня ----------
+async function loadTop(){
+  let d;
+  if (LIVE){ try { d = await api('/api/game/top'); } catch(e){ return; } }
+  else {
+    const me = G().best;
+    const t = [{name:'Артём',score:52},{name:'Лиза',score:44},{name:'Макс',score:37},{name:'Даня',score:29},{name:'Катя',score:21}];
+    if (me) t.push({name:'Ты',score:me,me:true});
+    t.sort((a,b) => b.score - a.score);
+    d = {top: t.slice(0,10), my_rank: me ? t.findIndex(x => x.me) + 1 : null, my_best: me};
+  }
+  const medal = ['🥇','🥈','🥉'];
+  $('#topList').innerHTML = d.top.length ? d.top.map((x, i) =>
+    `<div class="top-row r${i+1} ${x.me?'me':''}"><span class="n">${medal[i] || i+1}</span><span class="nm">${x.me ? 'Ты' : x.name.replace(/</g,'&lt;')}</span><span class="sc">${x.score} ⚡</span></div>`).join('')
+    : '<div class="srv-sub">Пока никто не взламывал — стань первым!</div>';
+  $('#tMe').textContent = d.my_rank ? `ты на ${d.my_rank} месте` : '';
+}
+
+
+// ---------- хаб бонусов: отдельные экраны игр ----------
+function openSub(id){
+  document.querySelectorAll('.screen').forEach(x => x.classList.remove('active'));
+  $('#' + id).classList.add('active'); window.scrollTo(0, 0); haptic();
+  if (id === 'hackScr') loadTop();
+}
+document.querySelectorAll('[data-open]').forEach(el => el.onclick = () => openSub(el.dataset.open));
+document.querySelectorAll('[data-back]').forEach(el => el.onclick = () => openSub('game'));
+(function tileWheel(){
+  let h = ''; const cols = ['#ff7a1a','#1c1c1c'];
+  for (let i = 0; i < 8; i++){ const a0 = i/8*2*Math.PI - Math.PI/2, a1 = (i+1)/8*2*Math.PI - Math.PI/2;
+    h += `<path d="M50 50 L${50+44*Math.cos(a0)} ${50+44*Math.sin(a0)} A44 44 0 0 1 ${50+44*Math.cos(a1)} ${50+44*Math.sin(a1)} Z" fill="${cols[i%2]}" stroke="#050505" stroke-width="1.5"/>`; }
+  h += '<circle cx="50" cy="50" r="46" fill="none" stroke="#ff9a4a" stroke-width="2"/><circle cx="50" cy="50" r="11" fill="#ff7a1a"/>';
+  $('#tileWheel').innerHTML = h;
+})();
+function renderHub(){
+  const g = G(), w = W();
+  const total = g.minutes_today + (w.spun_today ? w.today_prize : 0);
+  const h = Math.floor(total/60), m = total%60;
+  $('#hubToday').textContent = '+' + (h ? h + ' ч ' : '') + m + ' мин';
+  $('#hubBar').style.width = Math.min(100, total / (g.daily_cap + 180) * 100) + '%';
+  $('#hubSub').textContent = `🔥 Серия: ${w.streak} дн. · ` + (w.spun_today ? 'колесо уже крутил сегодня' : 'не забудь крутануть колесо');
+  $('#tHackSub').innerHTML = !g.allowed ? '🔒 Нужна активная подписка' : (g.rounds_left > 0 && g.minutes_today < g.daily_cap)
+    ? `Попыток сегодня: <b>${g.rounds_left}</b> · рекорд ${g.best || '—'}` : 'На сегодня всё — приходи завтра';
+  $('#tWheelSub').innerHTML = !w.allowed ? '🔒 Нужна активная подписка' : w.spun_today ? `Сегодня выпало <b>+${fmtLong(w.today_prize)}</b>` : '<b>Доступно сейчас!</b> Забери приз';
+  const wts = {10:30,15:25,20:18,30:13,45:7,60:5,120:1.5,180:.5};
+  $('#prizeList').innerHTML = w.prizes.map(p => `<div class="${p >= 120 ? 'rare' : ''}"><b>${fmtMin(p)}</b><span>${wts[p] != null ? wts[p] + '%' : ''}</span></div>`).join('');
+}
 
 // ---------- старт ----------
 (async () => {

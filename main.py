@@ -19,6 +19,8 @@ import json
 import logging
 import os
 import time
+import secrets
+import random
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, quote
 
@@ -1174,6 +1176,8 @@ async def adm_menu(message: Message, state: FSMContext):
 @admin_r.callback_query(F.data == "adm:stats")
 async def adm_stats(call: CallbackQuery):
     s = db.stats()
+    gs = db.game_stats(game_today())
+    ws = db.wheel_stats(game_today())
     await call.answer()
     c = db.count_users
     b = lambda t, d: InlineKeyboardButton(text=t, callback_data=d)
@@ -1190,7 +1194,9 @@ async def adm_stats(call: CallbackQuery):
         f"🎁 Взяли пробный: {s['trials']}\n"
         f"💰 Оплат: <b>{s['payments']}</b>\n"
         f"⭐ Звёзд всего: <b>{s['stars']}</b> (за сутки: {s['stars_today']})\n"
-        f"₽ Рублями (карта/крипта): <b>{s['rub']}</b> (за сутки: {s['rub_today']})\n\n"
+        f"₽ Рублями (карта/крипта): <b>{s['rub']}</b> (за сутки: {s['rub_today']})\n"
+        f"🎮 Игра сегодня: {gs['players']} игроков · {gs['rounds']} раундов · +{gs['minutes']} мин выдано\n"
+        f"🎡 Колесо сегодня: {ws['spins']} прокруток · +{ws['minutes']} мин выдано\n\n"
         "👇 Нажми, чтобы увидеть конкретных людей:",
         reply_markup=kb,
         parse_mode="HTML",
@@ -1924,6 +1930,8 @@ async def me_payload(u) -> dict:
         "support": SUPPORT,
         "support_email": SUPPORT_EMAIL,
         "bot": MAIN_USERNAME,
+        "game": game_info(u),
+        "wheel": wheel_info(u),
     }
 
 
@@ -1995,6 +2003,155 @@ async def api_trial(request):
     return web.json_response(await me_payload(db.get_user(u["id"])))
 
 
+# ---------------- мини-игра «Взлом сервера» ----------------
+GAME_ON = env("GAME_ON", "1") == "1"
+GAME_FOR_ALL = env("GAME_FOR_ALL", "0") == "1"      # 1 — играть могут и без подписки
+GAME_ROUNDS = int(env("GAME_ROUNDS", "3"))           # раундов в день
+GAME_DAILY_MIN = int(env("GAME_DAILY_MIN", "120"))   # максимум минут в день
+GAME_ROUND_MIN = int(env("GAME_ROUND_MIN", "40"))    # максимум минут за раунд
+GAME_SECONDS = 30
+GAME_MAX_SCORE = 300                                 # потолок очков за один взлом
+_game_sessions: dict[str, tuple[int, float]] = {}
+
+
+def game_today() -> str:
+    return datetime.now(MSK).strftime("%Y-%m-%d")
+
+
+def game_info(u) -> dict:
+    d = db.game_day(u["id"], game_today())
+    allowed = GAME_ON and (GAME_FOR_ALL or is_active(u))
+    reason = "" if allowed else ("off" if not GAME_ON else "need_sub")
+    return {
+        "allowed": allowed, "reason": reason,
+        "rounds_left": max(0, GAME_ROUNDS - d["rounds"]), "rounds": GAME_ROUNDS,
+        "minutes_today": d["minutes"], "daily_cap": GAME_DAILY_MIN, "round_cap": GAME_ROUND_MIN,
+        "best": d["best"], "seconds": GAME_SECONDS,
+    }
+
+
+async def add_seconds(uid: int, seconds: int):
+    u = db.get_user(uid)
+    base = max(int(time.time()), u["expires_at"] or 0)
+    db.set_expires(uid, base + seconds)
+    try:
+        await sync_user(uid)
+    except Exception as e:
+        log.error("Игра: панель не обновилась для %s: %s", uid, e)
+
+
+async def api_game_start(request):
+    u = api_user(request)
+    g = game_info(u)
+    if not g["allowed"]:
+        return web.json_response({"error": "Игра доступна с активной подпиской"}, status=403)
+    if g["rounds_left"] <= 0 or g["minutes_today"] >= GAME_DAILY_MIN:
+        return web.json_response({"error": "На сегодня всё — приходи завтра 🧡"}, status=429)
+    for t, (uid, ts) in list(_game_sessions.items()):  # чистим старые сессии
+        if uid == u["id"] or time.time() - ts > 600:
+            _game_sessions.pop(t, None)
+    db.game_start_round(u["id"], game_today())
+    token = secrets.token_urlsafe(16)
+    _game_sessions[token] = (u["id"], time.time())
+    return web.json_response({"token": token, "seconds": GAME_SECONDS, "game": game_info(db.get_user(u["id"]))})
+
+
+async def api_game_finish(request):
+    u = api_user(request)
+    body = await request.json()
+    sess = _game_sessions.pop(str(body.get("token", "")), None)
+    if not sess or sess[0] != u["id"]:
+        return web.json_response({"error": "Раунд не найден, начни заново"}, status=400)
+    elapsed = time.time() - sess[1]
+    try:
+        score = int(body.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0
+    # «Взлом сервера»: раунд идёт до 3 промахов; слой физически нельзя взять быстрее ~0,3 с
+    if elapsed < 2 or elapsed > 900 or score < 0 or score > GAME_MAX_SCORE or score > elapsed * 8 + 4:
+        log.warning("Игра: подозрительный результат %s: score=%s за %.1fс", u["id"], score, elapsed)
+        score = 0
+    d = db.game_day(u["id"], game_today())
+    minutes = max(0, min(score, GAME_ROUND_MIN, GAME_DAILY_MIN - d["minutes"]))
+    db.game_add_minutes(u["id"], game_today(), minutes, score)
+    if minutes:
+        await add_seconds(u["id"], minutes * 60)
+    u = db.get_user(u["id"])
+    return web.json_response({"score": score, "minutes": minutes, "game": game_info(u), "me": await me_payload(u),
+                              "rank": db.game_rank(u["id"], game_today())})
+
+
+# ---------------- колесо удачи и серия дней ----------------
+# (минуты, вес) — чем больше вес, тем чаще выпадает
+WHEEL_PRIZES = [(10, 30), (15, 25), (20, 18), (30, 13), (45, 7), (60, 5), (120, 1.5), (180, 0.5)]
+STREAK_BONUS = {3: 30, 7: 24 * 60}  # день серии → бонус в минутах (на 7-й день — сутки)
+
+
+def streak_of(uid: int) -> tuple[int, bool]:
+    """Серия: сколько дней подряд крутил колесо (включая сегодня/вчера). Возвращает (серия, крутил_сегодня)."""
+    days = set(db.wheel_days(uid))
+    today = datetime.now(MSK).date()
+    spun_today = today.isoformat() in days
+    d = today if spun_today else today - timedelta(days=1)
+    n = 0
+    while d.isoformat() in days:
+        n += 1
+        d -= timedelta(days=1)
+    return n, spun_today
+
+
+def wheel_info(u) -> dict:
+    streak, spun = streak_of(u["id"])
+    row = db.wheel_spin_today(u["id"], game_today())
+    nxt = streak + 1  # какой день серии будет при следующей прокрутке (сегодня или завтра)
+    cyc = ((streak - 1) % 7 + 1) if streak else 0             # позиция в недельном цикле
+    return {
+        "allowed": GAME_ON and (GAME_FOR_ALL or is_active(u)),
+        "spun_today": spun, "today_prize": row[0] if row else 0,
+        "prizes": [m for m, _ in WHEEL_PRIZES],
+        "streak": streak, "cycle_day": cyc, "next_day": ((nxt - 1) % 7 + 1),
+        "bonuses": {str(k): v for k, v in STREAK_BONUS.items()},
+    }
+
+
+def short_name(name: str | None, username: str | None) -> str:
+    n = (name or "").strip().split(" ")[0] or (username or "Игрок")
+    return n[:14]
+
+
+def game_top_payload(uid: int) -> dict:
+    day = game_today()
+    top = [{"name": short_name(r[2], r[3]), "score": r[1], "me": r[0] == uid} for r in db.game_top(day)]
+    return {"top": top, "my_rank": db.game_rank(uid, day), "my_best": db.game_day(uid, day)["best"]}
+
+
+async def api_wheel_spin(request):
+    u = api_user(request)
+    w = wheel_info(u)
+    if not w["allowed"]:
+        return web.json_response({"error": "Колесо доступно с активной подпиской"}, status=403)
+    if w["spun_today"]:
+        return web.json_response({"error": "Сегодня уже крутил — приходи завтра 🧡"}, status=429)
+    idx = random.choices(range(len(WHEEL_PRIZES)), weights=[wt for _, wt in WHEEL_PRIZES])[0]
+    prize = WHEEL_PRIZES[idx][0]
+    if not db.wheel_add(u["id"], game_today(), prize):
+        return web.json_response({"error": "Сегодня уже крутил"}, status=429)
+    streak, _ = streak_of(u["id"])
+    cyc = (streak - 1) % 7 + 1
+    bonus = STREAK_BONUS.get(cyc, 0)
+    await add_seconds(u["id"], (prize + bonus) * 60)
+    if prize >= 120 or bonus >= 24 * 60:
+        await notify_admin(f"🎡 <code>{u['id']}</code> выиграл в колесе {prize} мин" + (f" + бонус серии {bonus} мин" if bonus else ""))
+    u = db.get_user(u["id"])
+    return web.json_response({"index": idx, "prize": prize, "bonus": bonus, "streak": streak,
+                              "wheel": wheel_info(u), "me": await me_payload(u)})
+
+
+async def api_game_top(request):
+    u = api_user(request)
+    return web.json_response(game_top_payload(u["id"]))
+
+
 async def api_public(request):
     """Публичные данные для страниц документов: контакты поддержки, тарифы, кодовое слово."""
     return web.json_response({
@@ -2015,6 +2172,10 @@ async def start_api():
     app.router.add_get("/api/public", api_public)
     app.router.add_post("/api/invoice", api_invoice)
     app.router.add_post("/api/trial", api_trial)
+    app.router.add_post("/api/game/start", api_game_start)
+    app.router.add_post("/api/game/finish", api_game_finish)
+    app.router.add_post("/api/wheel/spin", api_wheel_spin)
+    app.router.add_get("/api/game/top", api_game_top)
     app.router.add_post("/yoomoney", api_yoomoney)
     app.router.add_post("/platega", api_platega)
     app.router.add_route("OPTIONS", "/{tail:.*}", api_root)

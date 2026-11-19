@@ -1,4 +1,4 @@
-"""База данных KlyxVPN (SQLite).
+"""База данных KluxVPN (SQLite).
 
 На Railway база должна лежать на Volume (DB_PATH=/data/klyx.db),
 иначе при каждом перезапуске она будет стираться.
@@ -284,3 +284,82 @@ def touch(uid: int, platform: str | None, ip: str | None):
 
 def active_user_ids():
     return [r[0] for r in _conn.execute("SELECT id FROM users WHERE expires_at>? AND uuid IS NOT NULL", (now(),)).fetchall()]
+
+
+# ---------------- мини-игра ----------------
+_conn.execute(
+    """CREATE TABLE IF NOT EXISTS game_days (
+        user_id INTEGER, day TEXT, rounds INTEGER DEFAULT 0, minutes INTEGER DEFAULT 0, best INTEGER DEFAULT 0,
+        PRIMARY KEY (user_id, day))"""
+)
+_conn.commit()
+
+
+def game_day(uid: int, day: str) -> dict:
+    r = _conn.execute("SELECT rounds, minutes, best FROM game_days WHERE user_id=? AND day=?", (uid, day)).fetchone()
+    return {"rounds": r[0], "minutes": r[1], "best": r[2]} if r else {"rounds": 0, "minutes": 0, "best": 0}
+
+
+def game_start_round(uid: int, day: str):
+    _conn.execute(
+        "INSERT INTO game_days (user_id, day, rounds) VALUES (?, ?, 1) "
+        "ON CONFLICT(user_id, day) DO UPDATE SET rounds = rounds + 1", (uid, day))
+    _conn.commit()
+
+
+def game_add_minutes(uid: int, day: str, minutes: int, score: int):
+    _conn.execute(
+        "UPDATE game_days SET minutes = minutes + ?, best = MAX(best, ?) WHERE user_id=? AND day=?",
+        (minutes, score, uid, day))
+    _conn.commit()
+
+
+def game_stats(day: str) -> dict:
+    r = _conn.execute("SELECT COUNT(*), COALESCE(SUM(rounds),0), COALESCE(SUM(minutes),0) FROM game_days WHERE day=?",
+                      (day,)).fetchone()
+    return {"players": r[0], "rounds": r[1], "minutes": r[2]}
+
+
+# ---------------- колесо удачи ----------------
+_conn.execute(
+    """CREATE TABLE IF NOT EXISTS wheel_spins (
+        user_id INTEGER, day TEXT, prize INTEGER, created_at INTEGER, PRIMARY KEY (user_id, day))"""
+)
+_conn.commit()
+
+
+def wheel_spin_today(uid: int, day: str):
+    return _conn.execute("SELECT prize FROM wheel_spins WHERE user_id=? AND day=?", (uid, day)).fetchone()
+
+
+def wheel_add(uid: int, day: str, prize: int) -> bool:
+    try:
+        _conn.execute("INSERT INTO wheel_spins (user_id, day, prize, created_at) VALUES (?, ?, ?, ?)",
+                      (uid, day, prize, now()))
+        _conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False  # уже крутил сегодня
+
+
+def wheel_days(uid: int, limit: int = 60) -> list[str]:
+    return [r[0] for r in _conn.execute(
+        "SELECT day FROM wheel_spins WHERE user_id=? ORDER BY day DESC LIMIT ?", (uid, limit)).fetchall()]
+
+
+def game_top(day: str, limit: int = 10):
+    return _conn.execute(
+        "SELECT g.user_id, g.best, u.name, u.username FROM game_days g LEFT JOIN users u ON u.id=g.user_id "
+        "WHERE g.day=? AND g.best>0 ORDER BY g.best DESC, g.user_id LIMIT ?", (day, limit)).fetchall()
+
+
+def game_rank(uid: int, day: str):
+    r = _conn.execute("SELECT best FROM game_days WHERE user_id=? AND day=?", (uid, day)).fetchone()
+    if not r or not r[0]:
+        return None
+    return _conn.execute("SELECT COUNT(*) FROM game_days WHERE day=? AND best>?", (day, r[0])).fetchone()[0] + 1
+
+
+def wheel_stats(day: str) -> dict:
+    r = _conn.execute("SELECT COUNT(*), COALESCE(SUM(prize),0) FROM wheel_spins WHERE day=?", (day,)).fetchone()
+    return {"spins": r[0], "minutes": r[1]}
