@@ -170,10 +170,11 @@
   <!-- PLANS -->
   <section class="screen" id="plans">
     <h2>Тарифы</h2>
-    <p class="sub">Без ограничений по скорости и трафику</p>
+    <p class="sub">Высокая скорость и безлимитный трафик</p>
 
     <div class="tabs" id="payTabs">
       <div class="tab active" data-m="stars">⭐ Stars</div>
+      <div class="tab" data-m="sbp">🏦 СБП</div>
       <div class="tab" data-m="card">💳 Карта</div>
       <div class="tab" data-m="crypto">₿ Крипта</div>
     </div>
@@ -184,7 +185,7 @@
       <ul class="feat">
         <li>Безлимитный трафик</li>
         <li id="featDev">До 3 устройств на один ключ</li>
-        <li>VLESS Reality — работает там, где другие блокируют</li>
+        <li>Современное шифрование VLESS Reality</li>
         <li>Ключ приходит сразу после оплаты</li>
       </ul>
     </div>
@@ -244,6 +245,14 @@
       <div class="row" style="padding:4px 0"><span>Приглашено друзей</span><b id="invited">0</b></div>
       <div class="row" style="padding:4px 0"><span>Бонусных дней</span><b id="bonusDays">0</b></div>
     </div>
+    <div class="card">
+      <b>Документы</b>
+      <div class="row" style="margin-top:10px;gap:8px">
+        <button class="btn ghost" id="docTerms" style="padding:12px;font-size:14px">📄 Соглашение</button>
+        <button class="btn ghost" id="docPrivacy" style="padding:12px;font-size:14px">🔒 Конфиденциальность</button>
+      </div>
+      <div class="srv-sub" id="supportInfo" style="margin-top:10px"></div>
+    </div>
     <button class="btn ghost" id="support">🆘 Поддержка</button>
   </section>
 </div>
@@ -295,7 +304,7 @@ const DEMO = {
   id: Math.floor(100000000 + Math.random()*900000000), name: 'Гость', active: false, expires_at: 0, expires_text: '',
   days_left: 0, key: null, trial_available: true, trial_days: 1, devices: 3,
   plans: [{key:'m1',name:'1 месяц',stars:129,rub:195,days:30},{key:'m3',name:'3 месяца',stars:324,rub:495,days:90},{key:'m12',name:'12 месяцев',stars:1039,rub:1560,days:365}],
-  methods: ['stars','crypto','card'],
+  methods: ['stars','sbp','crypto'],
   servers: [{name:'🇫🇷 Франция',protocol:'VLESS Reality'}],
   ref_link: 'https://t.me/klyxvpn_bot?start=ref0', ref_bonus: 7, invited: 0, bonus_days: 0, support: '', bot: 'klyxvpn_bot',
 };
@@ -343,12 +352,14 @@ function render(){
   $('#refLink').value = S.ref_link;
   $('#invited').textContent = S.invited;
   $('#bonusDays').textContent = S.bonus_days;
+  $('#supportInfo').textContent = [S.support ? '@' + S.support : '', S.support_email || ''].filter(Boolean).join(' · ') ? 'Поддержка: ' + [S.support ? '@' + S.support : '', S.support_email || ''].filter(Boolean).join(' · ') : '';
 }
 
-const unit = {stars:' ⭐', card:' ₽', crypto:' ₽'};
+const unit = {stars:' ⭐', card:' ₽', crypto:' ₽', sbp:' ₽'};
 const notes = {
   stars: 'Оплата прямо в Telegram — ключ придёт сразу',
   card: 'Картой любого банка РФ через ЮMoney — ключ придёт сразу',
+  sbp: 'СБП: QR-код или ссылка в приложение банка — ключ придёт сразу',
   crypto: 'USDT · TON · BTC через @CryptoBot по курсу — ключ придёт сразу',
 };
 const hasMethod = m => !S.methods || S.methods.includes(m);
@@ -371,7 +382,7 @@ function renderPlans(){
   document.querySelectorAll('.plan').forEach(el => el.onclick = () => { planKey = el.dataset.key; renderPlans(); haptic(); });
   $('#payNote').textContent = notes[method];
   const p = S.plans.find(x => x.key===planKey) || S.plans[0];
-  const label = {stars:'Оплатить ', card:'Оплатить картой ', crypto:'Оплатить криптой '}[method];
+  const label = {stars:'Оплатить ', card:'Оплатить картой ', crypto:'Оплатить криптой ', sbp:'Оплатить по СБП '}[method];
   $('#payBtn').textContent = label + fmtNum(priceOf(p, method)) + unit[method];
   $('#payBtn').disabled = !hasMethod(method);
   $('#cryptoHelp').style.display = method === 'crypto' ? '' : 'none';
@@ -380,6 +391,12 @@ function renderPlans(){
   tabs.forEach(t => t.style.display = hasMethod(t.dataset.m) ? '' : 'none');
   $('#payTabs').style.display = (S.methods && S.methods.length < 2) ? 'none' : '';
 }
+
+// ---------- документы ----------
+const docUrl = f => new URL(f, location.href.split('?')[0].split('#')[0]).href;
+const openDoc = f => { haptic(); if (tg && tg.openLink) tg.openLink(docUrl(f)); else window.open(docUrl(f), '_blank'); };
+$('#docTerms').onclick = () => openDoc('terms.html');
+$('#docPrivacy').onclick = () => openDoc('privacy.html');
 
 // ---------- помощь с криптой ----------
 $('#cryptoHelpToggle').onclick = () => {

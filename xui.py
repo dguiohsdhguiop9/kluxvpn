@@ -316,6 +316,15 @@ class XUI:
             return list(dict.fromkeys(ips))  # без повторов, порядок сохраняем
         return []
 
+    async def clear_ips(self, tg_id: int):
+        email = quote(self.email_for(tg_id))
+        for path in (f"/panel/api/inbounds/clearClientIps/{email}", f"/panel/api/clients/clearIps/{email}"):
+            try:
+                await self._req("POST", path)
+                return
+            except PanelError:
+                continue
+
     async def client_traffic(self, tg_id: int) -> dict:
         email = quote(self.email_for(tg_id))
         for path in (f"/panel/api/inbounds/getClientTraffics/{email}", f"/panel/api/clients/traffic/{email}"):

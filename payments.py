@@ -85,3 +85,72 @@ class YooMoney:
         keys = ["notification_type", "operation_id", "amount", "currency", "datetime", "sender", "codepro"]
         s = "&".join(form.get(k, "") for k in keys) + f"&{self.secret}&" + form.get("label", "")
         return hashlib.sha1(s.encode()).hexdigest() == form.get("sha1_hash", "")
+
+
+class Platega:
+    """Platega.io: СБП (QR / ссылка в банковском приложении) и крипта. Метод оплаты клиент выбирает на странице оплаты.
+
+    Ключи: личный кабинет Platega → «Настройки» (MerchantId и API-ключ).
+    Колбэк: укажи в кабинете адрес https://<твой-домен>/platega
+    Оплату бот всегда перепроверяет запросом статуса в API Platega — подделать колбэк нельзя.
+    """
+
+    MAX_RUB = 10_000  # лимит провайдера на одну транзакцию
+
+    def __init__(self, merchant_id: str, secret: str, base_url: str = "https://app.platega.io"):
+        self.merchant_id = merchant_id
+        self.secret = secret
+        self.base = (base_url or "https://app.platega.io").rstrip("/")
+        self._session = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.merchant_id and self.secret)
+
+    async def _call(self, method: str, path: str, body: dict | None = None) -> dict:
+        import aiohttp
+
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+        headers = {"X-MerchantId": self.merchant_id, "X-Secret": self.secret,
+                   "Content-Type": "application/json", "Accept": "application/json"}
+        async with self._session.request(method, f"{self.base}{path}", json=body, headers=headers) as r:
+            text = await r.text()
+            if r.status >= 400:
+                raise RuntimeError(f"Platega HTTP {r.status}: {text[:300]}")
+        try:
+            return json.loads(text)
+        except Exception:
+            raise RuntimeError(f"Platega: неожиданный ответ {text[:200]}")
+
+    async def create(self, amount_rub: int, tg_id: int, description: str, payload: str,
+                     return_url: str, fail_url: str, user_name: str = "", client_ip: str = "") -> tuple[str, str]:
+        """Создаёт платёж. Возвращает (transactionId, ссылка на оплату)."""
+        if amount_rub > self.MAX_RUB:
+            raise ValueError(f"Сумма больше лимита {self.MAX_RUB} ₽")
+        metadata = {
+            "user_email": f"{tg_id}@telegram.org",  # формат Platega для магазинов в Telegram
+            "userId": str(tg_id),
+        }
+        if user_name:
+            metadata["userName"] = user_name[:100]
+        if client_ip:
+            metadata["clientIp"] = client_ip
+        res = await self._call("POST", "/v2/transaction/process", {
+            "paymentDetails": {"amount": amount_rub, "currency": "RUB"},
+            "description": description[:250],
+            "return": return_url,
+            "failedUrl": fail_url,
+            "payload": payload,
+            "metadata": metadata,
+        })
+        tid = res.get("transactionId") or res.get("id")
+        url = res.get("url") or res.get("redirect") or res.get("paymentUrl")
+        if not tid or not url:
+            raise RuntimeError(f"Platega: в ответе нет ссылки: {str(res)[:200]}")
+        return str(tid), url
+
+    async def status(self, transaction_id: str) -> str:
+        """Статус платежа: CONFIRMED / PENDING / CANCELED / ... (в верхнем регистре)."""
+        res = await self._call("GET", f"/transaction/{transaction_id}")
+        return str(res.get("status") or res.get("Status") or "").upper()

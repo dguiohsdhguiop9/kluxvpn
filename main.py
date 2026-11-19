@@ -43,7 +43,7 @@ from aiogram.types import (
 from aiohttp import web
 
 import db
-from payments import CryptoPay, YooMoney
+from payments import CryptoPay, Platega, YooMoney
 from xui import XUI
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
@@ -78,6 +78,12 @@ ADMIN_PASSWORD = env("ADMIN_PASSWORD")  # пароль для входа в /adm
 ADMIN_IDS = {ADMIN_ID} | {int(x) for x in env("ADMIN_IDS").replace(" ", "").split(",") if x.isdigit()}
 crypto = CryptoPay(env("CRYPTOBOT_TOKEN"), env("CRYPTOBOT_TESTNET") == "1")
 yoomoney = YooMoney(env("YOOMONEY_WALLET"), env("YOOMONEY_SECRET"))
+platega = Platega(env("PLATEGA_MERCHANT_ID"), env("PLATEGA_SECRET"), env("PLATEGA_URL", "https://app.platega.io"))
+SUPPORT_EMAIL = env("SUPPORT_EMAIL")
+CODE_WORD = env("CODE_WORD")  # кодовое слово для проверки платёжкой (например PlaVER), потом удалить
+DOCS_BASE = env("DOCS_URL") or (WEBAPP_URL.split("?")[0].rstrip("/") if WEBAPP_URL else "")
+TERMS_URL = f"{DOCS_BASE}/terms.html" if DOCS_BASE else ""
+PRIVACY_URL = f"{DOCS_BASE}/privacy.html" if DOCS_BASE else ""
 
 if not BOT_TOKEN:
     raise SystemExit("❌ Не задан BOT_TOKEN. Добавь его в Railway → Variables.")
@@ -105,11 +111,14 @@ CRYPTO_HELP = (
     "🔸 Застрял? Жми «Поддержка» — поможем"
 )
 
-METHOD_NAMES = {"stars": "⭐ Telegram Stars", "crypto": "🪙 Криптовалюта", "card": "💳 Картой (рубли)"}
+METHOD_NAMES = {"stars": "⭐ Telegram Stars", "sbp": "🏦 СБП (рубли)", "crypto": "🪙 Криптовалюта",
+                "card": "💳 Картой (рубли)"}
 
 
 def methods() -> list[str]:
     m = ["stars"]
+    if platega.enabled:
+        m.append("sbp")
     if crypto.enabled:
         m.append("crypto")
     if yoomoney.enabled:
@@ -190,7 +199,21 @@ def ref_link(uid: int) -> str:
 
 
 def support_text() -> str:
-    return f"@{SUPPORT}" if SUPPORT else "напиши администратору"
+    parts = []
+    if SUPPORT:
+        parts.append(f"@{SUPPORT}")
+    if SUPPORT_EMAIL:
+        parts.append(SUPPORT_EMAIL)
+    return " · ".join(parts) or "напиши администратору"
+
+
+def docs_row() -> list:
+    row = []
+    if TERMS_URL:
+        row.append(InlineKeyboardButton(text="📄 Соглашение", url=TERMS_URL))
+    if PRIVACY_URL:
+        row.append(InlineKeyboardButton(text="🔒 Конфиденциальность", url=PRIVACY_URL))
+    return row
 
 
 async def notify_admin(text: str):
@@ -258,7 +281,7 @@ def home_text(u) -> str:
         status = "⚫️ Подписки нет"
     return (
         "⚡️ <b>KlyxVPN</b> — быстрый и надёжный VPN\n\n"
-        "🔸 Протокол VLESS Reality — работает там, где другие блокируют\n"
+        "🔸 Современное шифрование VLESS Reality — защищённое и стабильное подключение\n"
         f"🔸 Безлимитный трафик · до {DEVICES} устройств\n"
         f"🔸 Сервер: {SERVER_NAME}\n\n"
         f"{status}"
@@ -280,6 +303,8 @@ def home_kb(u) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="ref"),
         InlineKeyboardButton(text="💬 Поддержка", callback_data="support"),
     ])
+    if docs_row():
+        rows.append(docs_row())
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -428,7 +453,7 @@ _sticker_ids: dict[str, str] = {}
 
 
 def sticker_set_name() -> str:
-    return f"klyxvpn_by_{MAIN_USERNAME}"
+    return f"klyxvpn2_by_{MAIN_USERNAME}"
 
 
 async def load_stickers():
@@ -555,16 +580,19 @@ async def cmd_key(message: Message):
 
 @main_r.message(Command("terms"))
 async def cmd_terms(message: Message):
-    await message.answer(
-        "📄 <b>Условия использования KlyxVPN</b>\n\n"
-        "1. Подписка даёт доступ к VPN на выбранный срок.\n"
-        f"2. Один ключ — до {DEVICES} устройств, передавать ключ третьим лицам нельзя.\n"
-        "3. Запрещено использовать сервис для незаконной деятельности.\n"
-        "4. Если сервис не заработал — напиши в поддержку, разберёмся или вернём оплату.\n"
-        "5. Мы не записываем, какие сайты ты посещаешь. Для защиты от передачи ключей "
-        "видим IP-адреса подключённых устройств и устройство, с которого открыто приложение.",
-        parse_mode="HTML",
+    text = (
+        "📄 <b>Документы KlyxVPN</b>\n\n"
+        "🔸 Пользовательское соглашение — условия, тарифы, оплата и возвраты\n"
+        "🔸 Политика конфиденциальности — какие данные мы обрабатываем и зачем\n\n"
+        f"💬 Поддержка: {support_text()}"
     )
+    kb = InlineKeyboardMarkup(inline_keyboard=[docs_row()] if docs_row() else [])
+    await message.answer(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@main_r.message(Command("privacy"))
+async def cmd_privacy(message: Message):
+    await cmd_terms(message)
 
 
 @main_r.message(Command("paysupport"))
@@ -627,6 +655,14 @@ async def create_payment(method: str, key: str, uid: int) -> tuple[str, str | No
         inv_id, url, _ = await crypto.create_invoice(rub, f"{key}:{uid}", f"KlyxVPN — {name}")
         db.add_invoice(f"cb_{inv_id}", uid, key, "crypto", rub, "RUB")
         return url, f"cb_{inv_id}"
+    if method == "sbp":
+        u = db.get_user(uid)
+        back = f"https://t.me/{MAIN_USERNAME}"
+        tid, url = await platega.create(rub, uid, f"KlyxVPN — {name}", f"{key}:{uid}", back, back,
+                                        user_name=(u["username"] or u["name"] or "") if u else "",
+                                        client_ip=(u["app_ip"] or "") if u else "")
+        db.add_invoice(f"pg_{tid}", uid, key, "sbp", rub, "RUB")
+        return url, f"pg_{tid}"
     if method == "card":
         inv_id = f"ym_{uid}_{int(time.time())}"
         db.add_invoice(inv_id, uid, key, "card", rub, "RUB")
@@ -647,6 +683,7 @@ async def start_payment(call: CallbackQuery, method: str, key: str):
         "stars": "Нажми кнопку ниже — откроется оплата звёздами.",
         "crypto": "Откроется @CryptoBot — оплати в USDT, TON, BTC или другой монете. Сумма считается по курсу.",
         "card": "Откроется страница ЮMoney — оплати картой любого банка РФ.",
+        "sbp": "Откроется страница оплаты: отсканируй QR-код или нажми ссылку — платёж откроется в приложении твоего банка (СБП).",
     }
     rows = [[InlineKeyboardButton(text=f"Оплатить {price}", url=link)]]
     if method == "crypto":
@@ -696,6 +733,15 @@ async def cb_check(call: CallbackQuery):
         if paid:
             await call.answer("✅ Оплата найдена!")
             return await fulfill_invoice(inv, paid[0].get("paid_asset", "crypto"))
+    if inv["provider"] == "sbp":
+        try:
+            st = await platega.status(inv_id[3:])
+        except Exception as e:
+            log.warning("Platega check: %s", e)
+            st = ""
+        if st == "CONFIRMED":
+            await call.answer("✅ Оплата найдена!")
+            return await fulfill_invoice(inv, "СБП (Platega)")
     await call.answer("Оплата пока не поступила. Если только что оплатил — подожди минуту и нажми ещё раз.", show_alert=True)
 
 
@@ -767,8 +813,9 @@ async def cb_support(call: CallbackQuery):
     await edit_or_send(
         call,
         f"💬 <b>Поддержка</b>\n\nПиши: {support_text()}\nОбычно отвечаем в течение пары часов.\n\n"
-        "Перед вопросом проверь:\n• подписка активна (🔑 Мой ключ)\n• ключ вставлен целиком\n• в приложении включён VPN",
-        back_kb(),
+        "Перед вопросом проверь:\n• подписка активна (🔑 Мой ключ)\n• ключ вставлен целиком\n• в приложении включён VPN"
+        + (f"\n\n🔖 Кодовое слово: <code>{esc(CODE_WORD)}</code>" if CODE_WORD else ""),
+        back_kb(*([docs_row()] if docs_row() else [])),
         "support",
     )
 
@@ -863,6 +910,26 @@ async def crypto_loop():
         except Exception as e:
             log.error("crypto_loop: %s", e)
         await asyncio.sleep(15)
+
+
+async def platega_loop():
+    """Каждые 20 секунд перепроверяет неоплаченные счета Platega (на случай, если колбэк не дошёл)."""
+    while True:
+        try:
+            if platega.enabled:
+                for p in db.pending_invoices("sbp", 2 * 3600):
+                    try:
+                        st = await platega.status(p["id"][3:])
+                    except Exception as e:
+                        log.warning("platega status %s: %s", p["id"], e)
+                        continue
+                    if st == "CONFIRMED":
+                        await fulfill_invoice(p, "СБП (Platega)")
+                    elif st in ("CANCELED", "CANCELLED", "EXPIRED", "FAILED", "CHARGEBACKED"):
+                        db.set_invoice_status(p["id"], st.lower())
+        except Exception as e:
+            log.error("platega_loop: %s", e)
+        await asyncio.sleep(20)
 
 
 # ---------------- платёжный бот: всё остальное ----------------
@@ -1029,24 +1096,36 @@ def flag(cc: str) -> str:
 
 
 async def geo(ips: list[str]) -> dict[str, dict]:
-    need = [ip for ip in ips if ip not in _geo_cache]
+    need = [ip for ip in ips if ip not in _geo_cache and is_public_ip(ip)]
     if need:
-        try:
-            import aiohttp
+        import aiohttp
+        try:  # основной сервис: ip-api.com (до 100 адресов за раз)
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as sess:
-                async with sess.post("http://ip-api.com/batch?fields=query,status,country,countryCode,city,isp",
+                async with sess.post("http://ip-api.com/batch?fields=query,status,country,countryCode,city,isp&lang=ru",
                                      json=[{"query": ip} for ip in need[:100]]) as r:
                     for g in await r.json(content_type=None):
                         if g.get("status") == "success":
                             _geo_cache[g["query"]] = g
         except Exception as e:
-            log.warning("geo: %s", e)
+            log.warning("geo ip-api: %s", e)
+        for ip in [ip for ip in need if ip not in _geo_cache][:20]:  # запасной: ipwho.is
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as sess:
+                    async with sess.get(f"https://ipwho.is/{ip}?lang=ru") as r:
+                        d = await r.json(content_type=None)
+                if d.get("success"):
+                    _geo_cache[ip] = {"country": d.get("country"), "countryCode": d.get("country_code"),
+                                      "city": d.get("city"), "isp": (d.get("connection") or {}).get("isp")}
+            except Exception as e:
+                log.warning("geo ipwho: %s", e)
     return {ip: _geo_cache.get(ip, {}) for ip in ips}
 
 
 def geo_line(ip: str, g: dict) -> str:
+    if not is_public_ip(ip):
+        return f"🌍 <code>{ip}</code> — внутренний адрес, страну не определить"
     if not g:
-        return f"🌍 <code>{ip}</code>"
+        return f"🌍 <code>{ip}</code> — страна не определилась"
     place = ", ".join(x for x in (g.get("country"), g.get("city")) if x)
     return f"{flag(g.get('countryCode', ''))} <code>{ip}</code> — {esc(place)}" + (f" · {esc(g['isp'])}" if g.get("isp") else "")
 
@@ -1565,6 +1644,23 @@ async def cmd_refund(message: Message, command: CommandObject):
 
 
 # ---------------- напоминания ----------------
+async def clear_ips_loop():
+    """Раз в сутки очищает в панели журнал IP подключений (храним минимум данных)."""
+    await asyncio.sleep(600)
+    while True:
+        try:
+            if xui.configured:
+                for uid in db.active_user_ids():
+                    try:
+                        await xui.clear_ips(uid)
+                    except Exception:
+                        pass
+                log.info("🧹 Журнал IP подключений очищен")
+        except Exception as e:
+            log.error("clear_ips_loop: %s", e)
+        await asyncio.sleep(24 * 3600)
+
+
 async def reminders_loop():
     while True:
         try:
@@ -1620,14 +1716,46 @@ async def cors(request, handler):
     return resp
 
 
+_ip_headers_logged = False
+
+
+def is_public_ip(ip: str) -> bool:
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if a.version == 4 and a in ipaddress.ip_network("100.64.0.0/10"):  # внутренняя сеть Railway / CGNAT
+        return False
+    return not (a.is_private or a.is_loopback or a.is_reserved or a.is_link_local or a.is_multicast)
+
+
+def client_ip(request) -> str:
+    """Настоящий IP пользователя: берём первый ПУБЛИЧНЫЙ адрес из заголовков прокси Railway."""
+    global _ip_headers_logged
+    cands = []
+    for h in ("CF-Connecting-IP", "X-Real-IP", "X-Envoy-External-Address", "X-Forwarded-For", "Forwarded"):
+        v = request.headers.get(h, "")
+        if h == "Forwarded":
+            v = ",".join(p.split("for=", 1)[1].split(";")[0].strip('"[]') for p in v.split(",") if "for=" in p)
+        cands += [x.strip().split("%")[0] for x in v.split(",") if x.strip()]
+    if not _ip_headers_logged:
+        _ip_headers_logged = True
+        log.info("IP-заголовки: %s | remote=%s", {h: request.headers.get(h) for h in
+                 ("X-Real-IP", "X-Forwarded-For", "X-Envoy-External-Address", "Forwarded", "CF-Connecting-IP")}, request.remote)
+    for ip in cands:
+        if is_public_ip(ip):
+            return ip
+    return ""
+
+
 def api_user(request):
     tg = check_init_data(request.headers.get("X-Init-Data", ""))
     if not tg or "id" not in tg:
         raise web.HTTPUnauthorized(text='{"error":"bad init data"}')
     name = " ".join(x for x in [tg.get("first_name"), tg.get("last_name")] if x)
     db.upsert_user(tg["id"], tg.get("username"), name)
-    fwd = request.headers.get("X-Forwarded-For", "") or request.headers.get("X-Real-IP", "")
-    ip = fwd.split(",")[0].strip() or request.remote
+    ip = client_ip(request)
     platform = (request.headers.get("X-Platform") or "")[:20]
     try:
         db.touch(tg["id"], platform, ip)
@@ -1657,6 +1785,7 @@ async def me_payload(u) -> dict:
         "invited": db.count_invited(u["id"]),
         "bonus_days": u["bonus_days"],
         "support": SUPPORT,
+        "support_email": SUPPORT_EMAIL,
         "bot": MAIN_USERNAME,
     }
 
@@ -1673,6 +1802,31 @@ async def api_invoice(request):
         return web.json_response({"error": "unknown plan or method"}, status=400)
     link, inv_id = await create_payment(method, plan, u["id"])
     return web.json_response({"link": link, "method": method, "invoice": inv_id})
+
+
+async def api_platega(request):
+    """Колбэк Platega. Тело не доверяем — статус перепроверяем запросом в API Platega."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    tid = str(body.get("id") or body.get("transactionId") or body.get("TransactionId") or "")
+    inv = db.get_invoice(f"pg_{tid}") if tid else None
+    if not inv:
+        log.warning("Platega callback: неизвестная транзакция %s", tid)
+        return web.json_response({"ok": True})
+    try:
+        st = await platega.status(tid)
+    except Exception as e:
+        log.error("Platega callback status: %s", e)
+        return web.json_response({"ok": False}, status=500)  # пусть Platega повторит
+    if st == "CONFIRMED":
+        await fulfill_invoice(inv, "СБП (Platega)")
+    elif st in ("CANCELED", "CANCELLED", "EXPIRED", "FAILED"):
+        db.set_invoice_status(inv["id"], st.lower())
+    elif st == "CHARGEBACKED":
+        await notify_admin(f"⚠️ Platega: чарджбэк по платежу <code>{tid}</code> пользователя <code>{inv['user_id']}</code>")
+    return web.json_response({"ok": True})
 
 
 async def api_yoomoney(request):
@@ -1704,6 +1858,15 @@ async def api_trial(request):
     return web.json_response(await me_payload(db.get_user(u["id"])))
 
 
+async def api_public(request):
+    """Публичные данные для страниц документов: контакты поддержки, тарифы, кодовое слово."""
+    return web.json_response({
+        "support": SUPPORT, "support_email": SUPPORT_EMAIL, "bot": MAIN_USERNAME, "code_word": CODE_WORD,
+        "devices": DEVICES, "trial_days": TRIAL_DAYS,
+        "plans": [{"name": n, "stars": st, "rub": RUB_PRICES[k], "days": d} for k, (n, st, d) in PLANS.items()],
+    })
+
+
 async def api_root(request):
     return web.Response(text="KlyxVPN API ok")
 
@@ -1712,9 +1875,11 @@ async def start_api():
     app = web.Application(middlewares=[cors])
     app.router.add_get("/", api_root)
     app.router.add_get("/api/me", api_me)
+    app.router.add_get("/api/public", api_public)
     app.router.add_post("/api/invoice", api_invoice)
     app.router.add_post("/api/trial", api_trial)
     app.router.add_post("/yoomoney", api_yoomoney)
+    app.router.add_post("/platega", api_platega)
     app.router.add_route("OPTIONS", "/{tail:.*}", api_root)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -1732,6 +1897,11 @@ async def main():
     log.info("🗄 База: %s%s", db.DB_PATH, "" if db.is_persistent() else "  ⚠️ НЕ на Volume — данные сотрутся при перезапуске!")
     log.info("🖥 Панель 3X-UI: %s", "настроена" if xui.configured else "НЕ настроена (ключи выдаваться не будут)")
     log.info("💳 Способы оплаты: %s", ", ".join(methods()))
+    if platega.enabled:
+        log.info("🏦 Колбэк Platega: %s/platega", PUBLIC_URL or "(нужен PUBLIC_URL)")
+    too_big = [k for k, v in RUB_PRICES.items() if v > Platega.MAX_RUB]
+    if too_big:
+        log.warning("⚠️ Цены выше лимита Platega 10 000 ₽: %s", too_big)
     await load_stickers()
     await load_icons()
     log.info("🔐 Пароль админки: %s", "задан" if ADMIN_PASSWORD else "НЕ задан (добавь ADMIN_PASSWORD)")
@@ -1759,6 +1929,8 @@ async def main():
     await start_api()
     asyncio.create_task(reminders_loop())
     asyncio.create_task(crypto_loop())
+    asyncio.create_task(platega_loop())
+    asyncio.create_task(clear_ips_loop())
     await dp.start_polling(*bots)
 
 
