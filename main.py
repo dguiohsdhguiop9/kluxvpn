@@ -190,13 +190,18 @@ def is_active(u) -> bool:
     return bool(u and u["expires_at"] > time.time())
 
 
+APP_VERSION = str(int(time.time()))
+
+
 def webapp_url() -> str:
     if not WEBAPP_URL:
         return ""
-    if not PUBLIC_URL:
-        return WEBAPP_URL
     sep = "&" if "?" in WEBAPP_URL else "?"
-    return f"{WEBAPP_URL}{sep}api={quote(PUBLIC_URL, safe='')}"
+    # v= меняется при каждом перезапуске бота — Telegram не будет показывать старую закэшированную мини-апку
+    url = f"{WEBAPP_URL}{sep}v={APP_VERSION}"
+    if PUBLIC_URL:
+        url += f"&api={quote(PUBLIC_URL, safe='')}"
+    return url
 
 
 def ref_link(uid: int) -> str:
