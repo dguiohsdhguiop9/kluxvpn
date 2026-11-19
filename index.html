@@ -385,6 +385,8 @@ if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#050505'); tg.setBac
 // Адрес API бота бот сам подставляет в ссылку мини-апки (?api=...)
 const API = (new URLSearchParams(location.search).get('api') || '').replace(/\/$/, '');
 const LIVE = !!(API && tg && tg.initData);
+// внутри Telegram, но без данных пользователя (например, открыто с нижней клавиатуры) — не показываем демо
+const NO_AUTH = !!(tg && tg.platform && tg.platform !== 'unknown' && !tg.initData);
 
 const $ = s => document.querySelector(s);
 const toast = t => { const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),2200); };
@@ -564,8 +566,16 @@ function demoActivate(){
   render(); closePay(); toast('Демо: оплачено, ключ готов 🎉'); confetti(); setTimeout(()=>go('keyScr'),600);
 }
 
+function needAuth(){
+  openPay(`<h2>Открой приложение заново</h2>
+    <p class="srv-sub" style="margin:6px 0 16px;line-height:1.5">Telegram не передал данные аккаунта. Закрой это окно и открой KlyxVPN кнопкой <b>«KlyxVPN»</b> слева от поля ввода или кнопкой <b>«⚡️ Открыть KlyxVPN»</b> в сообщении бота.</p>
+    <button class="btn" id="closeApp">Понятно</button>`);
+  $('#closeApp').onclick = () => { try { tg.close(); } catch(e) { closePay(); } };
+}
+
 $('#payBtn').onclick = async () => {
   haptic('medium');
+  if (NO_AUTH) return needAuth();
   const p = S.plans.find(x => x.key===planKey);
   if (!LIVE) {
     if (method === 'stars') { $('#payBtn').textContent='Обработка…'; return setTimeout(demoActivate, 800); }
@@ -595,6 +605,7 @@ $('#payBtn').onclick = async () => {
 
 $('#trialBtn').onclick = async () => {
   haptic('medium');
+  if (NO_AUTH) return needAuth();
   if (!LIVE) { planKey='m1'; S = {...S, plans:S.plans}; const d=S.trial_days; S={...S, active:true, days_left:d, expires_text:new Date(Date.now()+d*86400000).toLocaleDateString('ru-RU'), trial_available:false, key:'vless://demo-trial@nl1.klyxvpn.net:443?security=reality#KlyxVPN'}; render(); toast('Демо: пробный период активирован'); confetti(); return go('keyScr'); }
   try { loading(true); S = await api('/api/trial', {}); render(); loading(false); toast('🎁 Пробный период активирован!'); confetti(); go('keyScr'); }
   catch(e){ loading(false); toast('Не получилось: ' + e.message); }
@@ -697,6 +708,7 @@ $('.logo').onclick = () => {
 
 // ---------- старт ----------
 (async () => {
+  if (NO_AUTH) { render(); setTimeout(needAuth, 400); return; }
   if (!LIVE) {
     const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
     if (u) S = {...S, id:u.id, name:[u.first_name,u.last_name].filter(Boolean).join(' ')};

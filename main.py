@@ -557,7 +557,8 @@ BTN_GUIDE, BTN_REF, BTN_TRIAL, BTN_SUPPORT = "📱 Подключить", "🤝 
 def reply_kb() -> ReplyKeyboardMarkup:
     rows = []
     if webapp_url():
-        rows.append([KeyboardButton(text=BTN_APP, web_app=WebAppInfo(url=webapp_url()))])
+        # обычная кнопка: из нижней клавиатуры Telegram не передаёт мини-апке данные пользователя
+        rows.append([KeyboardButton(text=BTN_APP)])
     rows += [
         [KeyboardButton(text=BTN_BUY), KeyboardButton(text=BTN_KEY)],
         [KeyboardButton(text=BTN_GUIDE), KeyboardButton(text=BTN_REF)],
@@ -678,6 +679,17 @@ async def msg_ref(message: Message):
 @main_r.message(F.text == BTN_SUPPORT)
 async def msg_support(message: Message):
     await cb_support(MsgCall(message))
+
+
+@main_r.message(F.text == BTN_APP)
+async def msg_app(message: Message):
+    if not webapp_url():
+        return await cmd_menu(message)
+    await message.answer(
+        "⚡️ Жми кнопку ниже — откроется приложение KlyxVPN",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⚡️ Открыть KlyxVPN", web_app=WebAppInfo(url=webapp_url()))]]),
+    )
 
 
 @main_r.message(F.text == BTN_BUY)
