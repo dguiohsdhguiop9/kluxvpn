@@ -60,6 +60,12 @@ log = logging.getLogger("klyxvpn")
 env = lambda k, d="": (os.getenv(k) or d).strip()
 
 BOT_TOKEN = env("BOT_TOKEN")
+# Отдельный бот-«перенаправлялка»: на /start присылает сообщение с кнопкой-ссылкой (необязательно)
+PROMO_BOT_TOKEN = env("PROMO_BOT_TOKEN")
+PROMO_TEXT = env("PROMO_TEXT", "👋 Привет! Всё самое интересное — в нашем основном боте 👇")
+PROMO_BUTTON = env("PROMO_BUTTON", "👉 Перейти в бота")
+PROMO_URL = env("PROMO_URL")  # куда ведёт кнопка, например https://t.me/kluxvpn_bot
+PROMO_PHOTO = env("PROMO_PHOTO")  # необязательно: ссылка на картинку для сообщения
 PAY_BOT_TOKEN = env("PAY_BOT_TOKEN")  # токен второго бота, куда будут приходить звёзды (необязательно)
 ADMIN_ID = int(env("ADMIN_ID", "8949720653"))
 WEBAPP_URL = env("WEBAPP_URL")
@@ -135,6 +141,7 @@ def methods() -> list[str]:
 
 main_bot = Bot(BOT_TOKEN)
 pay_bot = Bot(PAY_BOT_TOKEN) if PAY_BOT_TOKEN and PAY_BOT_TOKEN != BOT_TOKEN else main_bot
+promo_bot = Bot(PROMO_BOT_TOKEN) if PROMO_BOT_TOKEN and PROMO_BOT_TOKEN not in (BOT_TOKEN, PAY_BOT_TOKEN) else None
 MAIN_USERNAME = ""
 PAY_USERNAME = ""
 
@@ -144,8 +151,28 @@ admin_r = Router(name="admin")
 pay_r = Router(name="payments")
 paybot_r = Router(name="paybot")
 admin_login_r = Router(name="admin_login")
+promo_r = Router(name="promo")
 
 MSK = timezone(timedelta(hours=3))
+
+
+# ---------------- бот-перенаправлялка ----------------
+def promo_url() -> str:
+    return PROMO_URL or (f"https://t.me/{MAIN_USERNAME}" if MAIN_USERNAME else "")
+
+
+@promo_r.message()
+async def promo_any(message: Message):
+    """На /start и на любое сообщение — текст с кнопкой-ссылкой на другой бот."""
+    url = promo_url()
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=PROMO_BUTTON, url=url)]]) if url else None
+    try:
+        if PROMO_PHOTO:
+            await message.answer_photo(PROMO_PHOTO, caption=PROMO_TEXT, reply_markup=kb)
+        else:
+            await message.answer(PROMO_TEXT, reply_markup=kb, disable_web_page_preview=True)
+    except Exception as e:
+        log.warning("promo bot: %s", e)
 
 
 # ---------------- фильтры ----------------
@@ -157,6 +184,11 @@ class IsMainBot(BaseFilter):
 class IsPayBot(BaseFilter):
     async def __call__(self, event, bot: Bot) -> bool:
         return pay_bot is not main_bot and bot.id == pay_bot.id
+
+
+class IsPromoBot(BaseFilter):
+    async def __call__(self, event, bot: Bot) -> bool:
+        return promo_bot is not None and bot.id == promo_bot.id
 
 
 class IsAdmin(BaseFilter):
@@ -171,6 +203,8 @@ for r in (admin_r, admin_login_r):
     r.message.filter(IsAdmin())
     r.callback_query.filter(IsAdmin())
 paybot_r.message.filter(IsPayBot())
+promo_r.message.filter(IsPromoBot())
+promo_r.callback_query.filter(IsPromoBot())
 
 
 # ---------------- помощники ----------------
@@ -2221,10 +2255,13 @@ async def main():
             log.warning("Не удалось поставить кнопку меню: %s", e)
 
     bots = [main_bot] if pay_bot is main_bot else [main_bot, pay_bot]
+    if promo_bot:
+        bots.append(promo_bot)
+        log.info("🔗 Бот-перенаправлялка запущен → %s", promo_url())
     for b in bots:
         await b.delete_webhook(drop_pending_updates=False)
 
-    dp.include_routers(admin_login_r, admin_r, pay_r, main_r, paybot_r)
+    dp.include_routers(promo_r, admin_login_r, admin_r, pay_r, main_r, paybot_r)
     await start_api()
     asyncio.create_task(reminders_loop())
     asyncio.create_task(crypto_loop())
