@@ -25,9 +25,9 @@ def _as_dict(v):
     return v or {}
 
 
-def build_link(client_uuid: str, host: str, inbound: dict, name: str) -> str:
+def build_link(client_uuid: str, host: str, inbound: dict, name: str, port: int = 0) -> str:
     """Собирает ссылку vless:// из настроек инбаунда (запасной вариант, если панель не отдала ссылку)."""
-    port = inbound["port"]
+    port = port or inbound["port"]
     stream = _as_dict(inbound.get("streamSettings"))
     network = stream.get("network", "tcp")
     security = stream.get("security", "none")
@@ -122,6 +122,14 @@ class XUI:
         self.password = password
         self.token = token
         self.inbound_id = int(inbound_id or 0)
+        # host можно задать как "адрес" или "адрес:порт" — тогда ссылки для клиентов
+        # всегда идут на этот адрес/порт (нужно, когда хостинг пробрасывает 443 на другой порт)
+        self.override = bool(host)
+        self.port_override = 0
+        host = (host or "").strip()
+        if host.count(":") == 1:
+            host, p = host.split(":", 1)
+            self.port_override = int(p) if p.isdigit() else 0
         self.host = host or (urlparse(self.base).hostname or "")
         self.mode = None  # "v3" или "v2", определяется автоматически
         self._logged_in = False
@@ -298,10 +306,13 @@ class XUI:
                 links = list(_find_strings(obj, "vless://"))
                 if links:
                     base = links[0].split("#", 1)[0]
+                    if self.override:
+                        port = self.port_override or (await self.inbound())["port"]
+                        base = re.sub(r"@[^/?#]+?:\d+", f"@{self.host}:{port}", base, count=1)
                     return f"{base}#{quote(name)}"
             except PanelError as e:
                 log.warning("Не удалось взять ссылку у панели, собираю сам: %s", e)
-        return build_link(client_uuid, self.host, await self.inbound(), name)
+        return build_link(client_uuid, self.host, await self.inbound(), name, self.port_override)
 
     async def client_ips(self, tg_id: int) -> list[str]:
         """IP-адреса, с которых сейчас/недавно подключался клиент (панель ведёт их для лимита устройств)."""
