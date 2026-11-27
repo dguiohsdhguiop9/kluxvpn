@@ -401,6 +401,31 @@ async def sync_extra_servers(u):
 
 
 # статус серверов для мини-апки и админки
+def servers_label() -> str:
+    """Список стран для текстов бота: «🇫🇷 Франция, 🇩🇪 Германия, ...»."""
+    names = [x.name for x in all_servers()]
+    return ", ".join(names) if names else SERVER_NAME
+
+
+async def sync_all_extra_loop():
+    """Раздаёт ключи на доп. серверах всем, у кого уже есть подписка.
+    Сразу после запуска и потом раз в 3 часа (если какой-то сервер был недоступен — догонит)."""
+    await asyncio.sleep(20)
+    while True:
+        if EXTRA_SERVERS:
+            n = 0
+            for uid in db.active_user_ids():
+                try:
+                    u = db.get_user(uid)
+                    if u:
+                        await sync_extra_servers(u)
+                        n += 1
+                except Exception as e:
+                    log.error("sync_all_extra %s: %s", uid, e)
+            log.info("🌍 Ключи на доп. серверах проверены у %s подписчиков", n)
+        await asyncio.sleep(3 * 3600)
+
+
 SERVER_STATUS: dict[str, dict] = {}
 
 
@@ -489,7 +514,7 @@ def home_text(u) -> str:
         "⚡️ <b>KluxVPN</b> — быстрый и надёжный VPN\n\n"
         "🔸 Современное шифрование VLESS Reality — защищённое и стабильное подключение\n"
         f"🔸 Безлимитный трафик · до {DEVICES} устройств\n"
-        f"🔸 Сервер: {SERVER_NAME}\n\n"
+        f"🔸 Серверы: {servers_label()}\n\n"
         f"{status}"
     )
 
@@ -532,7 +557,7 @@ def plans_text() -> str:
         extra = f" · выгода {save}%" if save > 0 else ""
         rub = f" / {RUB_PRICES[key]} ₽" if len(methods()) > 1 else ""
         lines.append(f"🔸 <b>{name}</b> — {stars} ⭐{rub} ({per} ⭐/мес{extra})")
-    lines.append(f"\n🔸 Безлимит · до {DEVICES} устройств · {SERVER_NAME}")
+    lines.append(f"\n🔸 Безлимит · до {DEVICES} устройств · {servers_label()}")
     return "\n".join(lines)
 
 
@@ -3133,6 +3158,7 @@ async def main():
     asyncio.create_task(crypto_loop())
     asyncio.create_task(platega_loop())
     asyncio.create_task(servers_status_loop())
+    asyncio.create_task(sync_all_extra_loop())
     asyncio.create_task(backup_loop())
     asyncio.create_task(clear_ips_loop())
     await dp.start_polling(*bots)
