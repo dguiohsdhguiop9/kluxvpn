@@ -150,7 +150,6 @@ ADDON_STARS = int(env("ADDON_STARS", "55"))
 STAR_RUB = float(env("STAR_RUB", "1.5"))           # примерный курс звезды в рублях (для партнёрки и графика)
 PARTNER_PCT = int(env("PARTNER_PCT", "20"))        # % партнёрам по умолчанию
 PAYOUT_MIN = int(env("PAYOUT_MIN", "500"))         # минимальный вывод партнёра, ₽
-COINS_PER_DAY = int(env("COINS_PER_DAY", "100"))   # сколько Klux-коинов стоит 1 день подписки
 BACKUP_HOUR = int(env("BACKUP_HOUR", "4"))         # во сколько (МСК) присылать бэкап базы
 
 
@@ -512,9 +511,8 @@ def home_kb(u) -> InlineKeyboardMarkup:
     ])
     rows.append([
         InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="ref"),
-        InlineKeyboardButton(text="🏆 Награды", callback_data="coins"),
+        InlineKeyboardButton(text="💬 Поддержка", callback_data="support"),
     ])
-    rows.append([InlineKeyboardButton(text="💬 Поддержка", callback_data="support")])
     if docs_row():
         rows.append(docs_row())
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1301,14 +1299,7 @@ async def fulfill_payment(uid: int, key: str, amount: int, currency: str, charge
             await main_bot.send_message(ref["id"], f"🎉 Твой друг оплатил подписку — тебе +{REF_BONUS_DAYS} дн. KluxVPN!")
         except Exception:
             pass
-    if ref:
-        await award(ref["id"], "friend_paid")
 
-    await award(uid, "first_buy")
-    if p["kind"] == "gift":
-        await award(uid, "gift")
-    if p["key"] == "m12":
-        await award(uid, "year")
 
     cur = "⭐" if currency == "XTR" else ("₽" if currency == "RUB" else currency)
     extra = f"\nВозврат: <code>/refund {uid} {charge_id}</code>" if currency == "XTR" else ""
@@ -2148,7 +2139,7 @@ async def reminders_loop():
 
 
 
-# ======================= v2: коины, достижения, промокоды, подарки, партнёрка, тикеты =======================
+# ======================= v2: промокоды, подарки, партнёрка, тикеты =======================
 class UserSG(StatesGroup):
     promo = State()
     ticket = State()
@@ -2157,55 +2148,6 @@ class UserSG(StatesGroup):
 
 class AdminSG2(StatesGroup):
     ticket_reply = State()
-
-
-# код: (эмодзи, название, за что, коины)
-ACHIEVEMENTS = {
-    "first_buy": ("🛒", "Первая покупка", "Оплатил подписку", 50),
-    "year": ("👑", "На год вперёд", "Купил тариф на 12 месяцев", 150),
-    "gift": ("🎁", "Щедрая душа", "Подарил подписку другу", 50),
-    "friend_paid": ("🤝", "Друг с нами", "Друг по твоей ссылке оплатил", 50),
-    "streak7": ("🔥", "Неделя подряд", "7 дней подряд крутил колесо", 70),
-    "streak30": ("🌋", "Месяц подряд", "30 дней подряд крутил колесо", 300),
-    "hacker": ("💻", "Хакер", "Набрал 30+ очков во «Взломе сервера»", 40),
-    "elite": ("🧠", "Элитный хакер", "Набрал 60+ очков во «Взломе сервера»", 100),
-    "lucky": ("🍀", "Везунчик", "Выиграл 2+ часа в колесе", 60),
-    "promo": ("🎟", "Охотник за промо", "Активировал промокод", 20),
-}
-WHEEL_COINS = int(env("WHEEL_COINS", "5"))   # коины за каждый спин колеса
-
-
-async def award(uid: int, code: str) -> bool:
-    """Выдаёт достижение (один раз) и коины за него."""
-    if code not in ACHIEVEMENTS or not db.get_user(uid) or not db.ach_add(uid, code):
-        return False
-    emo, title, desc, coins = ACHIEVEMENTS[code]
-    total = db.coins_add(uid, coins, f"ach:{code}")
-    try:
-        await main_bot.send_message(uid, f"🏆 <b>Новое достижение!</b>\n\n{emo} <b>{title}</b> — {desc}\n"
-                                         f"+{coins} 🪙 Klux-коинов (всего {total})", parse_mode="HTML")
-    except Exception:
-        pass
-    return True
-
-
-def coins_payload(u) -> dict:
-    got = db.ach_list(u["id"])
-    return {
-        "coins": u["coins"] or 0, "per_day": COINS_PER_DAY,
-        "achievements": [{"code": c, "emoji": e, "title": t, "desc": d, "coins": k, "done": c in got}
-                         for c, (e, t, d, k) in ACHIEVEMENTS.items()],
-    }
-
-
-async def exchange_coins(uid: int, days: int) -> tuple[bool, str]:
-    if days < 1:
-        return False, "Укажи количество дней"
-    cost = days * COINS_PER_DAY
-    if not db.coins_spend(uid, cost, f"exchange:{days}d"):
-        return False, f"Не хватает коинов: нужно {cost} 🪙"
-    ok, _ = await add_days(uid, days)
-    return True, f"Обменял {cost} 🪙 на +{days} дн. подписки!"
 
 
 # ---------- промокоды ----------
@@ -2228,8 +2170,6 @@ async def apply_promo(uid: int, code: str) -> tuple[bool, str]:
         return False, "Промокод уже закончился"
     if p["partner_id"]:
         db.set_referrer_if_empty(uid, p["partner_id"])
-    if not code.startswith("GIFT-"):
-        await award(uid, "promo")
     if p["kind"] == "pct":
         db.set_field(uid, "promo_code", code)
         db.set_field(uid, "promo_pct", int(p["value"]))
@@ -2319,39 +2259,6 @@ async def cb_subreset(call: CallbackQuery):
     sub_token(u["id"], reset=True)
     await call.answer("Ссылка-подписка обновлена, старая больше не работает", show_alert=True)
     await cb_key(call)
-
-
-# ---------- коины и достижения ----------
-def coins_text(u) -> str:
-    got = db.ach_list(u["id"])
-    lines = [f"🏆 <b>Награды и Klux-коины</b>\n\n🪙 Баланс: <b>{u['coins'] or 0}</b> коинов\n"
-             f"💱 Курс: {COINS_PER_DAY} 🪙 = 1 день подписки\n\n<b>Достижения</b> ({len(got)}/{len(ACHIEVEMENTS)}):"]
-    for c, (e, t, d, k) in ACHIEVEMENTS.items():
-        lines.append(f"{'✅' if c in got else '▫️'} {e} <b>{t}</b> — {d} · +{k} 🪙")
-    lines.append(f"\nКоины также дают за спин колеса (+{WHEEL_COINS}) и за игры в «Бонусах».")
-    return "\n".join(lines)
-
-
-@main_r.callback_query(F.data == "coins")
-async def cb_coins(call: CallbackQuery):
-    u, _ = ensure_user(call.from_user)
-    rows = []
-    can = (u["coins"] or 0) // COINS_PER_DAY
-    if can >= 1:
-        btns = [InlineKeyboardButton(text=f"+{d} дн. за {d * COINS_PER_DAY} 🪙", callback_data=f"xch:{d}") for d in (1, 3, 7) if d <= can]
-        rows.append(btns)
-    if webapp_url():
-        rows.append([InlineKeyboardButton(text="🎮 Играть в «Бонусах»", web_app=WebAppInfo(url=webapp_url() + "#game"))])
-    await edit_or_send(call, coins_text(u), back_kb(*rows), "ref")
-    await call.answer()
-
-
-@main_r.callback_query(F.data.startswith("xch:"))
-async def cb_exchange(call: CallbackQuery):
-    ok, msg = await exchange_coins(call.from_user.id, int(call.data.split(":")[1]))
-    await call.answer(msg, show_alert=True)
-    if ok:
-        await cb_coins(call)
 
 
 # ---------- партнёрка ----------
@@ -2835,8 +2742,6 @@ async def me_payload(u) -> dict:
         "promo": {"code": u["promo_code"], "pct": u["promo_pct"] or 0},
         "partner": ({"pct": u["partner_pct"], "balance": u["partner_balance"] or 0, "min": PAYOUT_MIN,
                      **db.partner_stats(u["id"])} if u["partner_pct"] else None),
-        "coins": coins_payload(u),
-        "mini": mini_info(u),
         "trial_available": bool(TRIAL_DAYS and not u["trial_used"] and not active),
         "trial_days": TRIAL_DAYS,
         "devices": DEVICES,
@@ -3000,12 +2905,7 @@ async def api_game_finish(request):
     db.game_add_minutes(u["id"], game_today(), minutes, score)
     if minutes:
         await add_seconds(u["id"], minutes * 60)
-    if score >= 5:
-        db.coins_add(u["id"], score // 5, "hack")
-    if score >= 30:
-        await award(u["id"], "hacker")
-    if score >= 60:
-        await award(u["id"], "elite")
+
     u = db.get_user(u["id"])
     return web.json_response({"score": score, "minutes": minutes, "game": game_info(u), "me": await me_payload(u),
                               "rank": db.game_rank(u["id"], game_today())})
@@ -3070,13 +2970,7 @@ async def api_wheel_spin(request):
     cyc = (streak - 1) % 7 + 1
     bonus = STREAK_BONUS.get(cyc, 0)
     await add_seconds(u["id"], (prize + bonus) * 60)
-    db.coins_add(u["id"], WHEEL_COINS, "wheel")
-    if streak >= 7:
-        await award(u["id"], "streak7")
-    if streak >= 30:
-        await award(u["id"], "streak30")
-    if prize >= 120:
-        await award(u["id"], "lucky")
+
     if prize >= 120 or bonus >= 24 * 60:
         await notify_admin(f"🎡 <code>{u['id']}</code> выиграл в колесе {prize} мин" + (f" + бонус серии {bonus} мин" if bonus else ""))
     u = db.get_user(u["id"])
@@ -3090,20 +2984,7 @@ async def api_game_top(request):
 
 
 
-# ---------------- v2 API: промокоды, коины, устройства, партнёрка, «Башня данных» ----------------
-STACK_ROUNDS = int(env("STACK_ROUNDS", "3"))
-STACK_ROUND_MIN = int(env("STACK_ROUND_MIN", "30"))
-_mini_sessions: dict[str, tuple[int, float, str]] = {}
-
-
-def mini_info(u) -> dict:
-    d = db.mini_day(u["id"], "stack", game_today())
-    g = db.game_day(u["id"], game_today())
-    return {"allowed": GAME_ON and (GAME_FOR_ALL or is_active(u)), "rounds": STACK_ROUNDS,
-            "rounds_left": max(0, STACK_ROUNDS - d["rounds"]), "best": d["best"], "round_cap": STACK_ROUND_MIN,
-            "minutes_today": g["minutes"], "daily_cap": GAME_DAILY_MIN}
-
-
+# ---------------- v2 API: промокоды, устройства, партнёрка ----------------
 async def api_promo(request):
     u = api_user(request)
     body = await request.json()
@@ -3113,72 +2994,10 @@ async def api_promo(request):
                               "me": await me_payload(u)}, status=200 if ok else 400)
 
 
-async def api_coins_exchange(request):
-    u = api_user(request)
-    body = await request.json()
-    try:
-        days = int(body.get("days", 1))
-    except (TypeError, ValueError):
-        days = 0
-    ok, msg = await exchange_coins(u["id"], max(0, min(days, 30)))
-    return web.json_response({"ok": ok, "message": msg, "me": await me_payload(db.get_user(u["id"]))},
-                             status=200 if ok else 400)
-
-
 async def api_sub_reset(request):
     u = api_user(request)
     sub_token(u["id"], reset=True)
     return web.json_response({"me": await me_payload(db.get_user(u["id"]))})
-
-
-async def api_mini_start(request):
-    u = api_user(request)
-    m = mini_info(u)
-    if not m["allowed"]:
-        return web.json_response({"error": "Игра доступна с активной подпиской"}, status=403)
-    if m["rounds_left"] <= 0 or m["minutes_today"] >= GAME_DAILY_MIN:
-        return web.json_response({"error": "На сегодня всё — приходи завтра 🧡"}, status=429)
-    for t, (uid, ts, _) in list(_mini_sessions.items()):
-        if uid == u["id"] or time.time() - ts > 900:
-            _mini_sessions.pop(t, None)
-    db.mini_start(u["id"], "stack", game_today())
-    token = secrets.token_urlsafe(16)
-    _mini_sessions[token] = (u["id"], time.time(), "stack")
-    return web.json_response({"token": token, "mini": mini_info(db.get_user(u["id"]))})
-
-
-async def api_mini_finish(request):
-    u = api_user(request)
-    body = await request.json()
-    sess = _mini_sessions.pop(str(body.get("token", "")), None)
-    if not sess or sess[0] != u["id"]:
-        return web.json_response({"error": "Раунд не найден, начни заново"}, status=400)
-    elapsed = time.time() - sess[1]
-    try:
-        score = int(body.get("score", 0))
-    except (TypeError, ValueError):
-        score = 0
-    # блок физически нельзя поставить быстрее ~0,35 с
-    if elapsed < 1 or elapsed > 900 or score < 0 or score > 200 or score > elapsed * 3 + 2:
-        log.warning("Башня: подозрительный результат %s: %s за %.1fс", u["id"], score, elapsed)
-        score = 0
-    g = db.game_day(u["id"], game_today())
-    if g["rounds"] == 0:
-        db.game_start_round(u["id"], game_today())  # чтобы строка дня существовала для учёта минут
-        db.game_undo_round(u["id"], game_today())
-    minutes = max(0, min(score, STACK_ROUND_MIN, GAME_DAILY_MIN - g["minutes"]))
-    db.game_add_minutes(u["id"], game_today(), minutes, 0)
-    db.mini_best(u["id"], "stack", game_today(), score)
-    if minutes:
-        await add_seconds(u["id"], minutes * 60)
-    if score >= 5:
-        db.coins_add(u["id"], score // 5, "stack")
-    if score >= 15:
-        await award(u["id"], "builder")
-    if score >= 30:
-        await award(u["id"], "architect")
-    u = db.get_user(u["id"])
-    return web.json_response({"score": score, "minutes": minutes, "me": await me_payload(u)})
 
 
 async def api_payout(request):
@@ -3252,7 +3071,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/public", api_public)
     app.router.add_get("/sub/{token}", api_sub)
     app.router.add_post("/api/promo", api_promo)
-    app.router.add_post("/api/coins/exchange", api_coins_exchange)
     app.router.add_post("/api/sub/reset", api_sub_reset)
     app.router.add_post("/api/payout", api_payout)
     app.router.add_post("/api/invoice", api_invoice)

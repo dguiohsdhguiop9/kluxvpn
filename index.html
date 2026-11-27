@@ -331,7 +331,8 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
 .prizes span{font-size:10.5px;color:var(--muted)}
 .prizes .rare{border-color:rgba(255,215,90,.5)}.prizes .rare b{color:#ffd75a}
 
-/* ===== v2: промо, подарок, ключи, коины, партнёрка, башня ===== */
+/* ===== v2: промо, подарок, ключи, партнёрка ===== */
+.p-big{font:900 34px Unbounded;letter-spacing:-1px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 .seg2{display:flex;gap:6px;margin:0 0 12px}
 .seg2 .tab{flex:1;text-align:center;padding:10px 0;border-radius:14px;font-size:13px;font-weight:800;color:var(--muted);background:rgba(18,18,18,.8);border:1px solid var(--line);cursor:pointer;transition:.25s}
 .seg2 .tab.active{color:#1a0800;background:var(--grad);border-color:transparent;box-shadow:0 4px 16px rgba(255,100,10,.35)}
@@ -346,26 +347,6 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
 .keyrow .kname{font-weight:800;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
 .mini-copy{border:1px solid var(--line2);background:var(--glass2);color:#fff;border-radius:10px;padding:6px 12px;font:700 12px Manrope;cursor:pointer}
 .sub-card{border-color:rgba(255,122,26,.3);background:linear-gradient(140deg,rgba(255,122,26,.12),rgba(20,20,20,.7) 60%)}
-.coin-big{font:900 40px Unbounded;letter-spacing:-1px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.xch{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
-.xch button{border:1px solid var(--line2);background:rgba(0,0,0,.35);color:#fff;border-radius:14px;padding:11px 4px;font:800 13px Manrope;cursor:pointer}
-.xch button small{display:block;font:600 11px Manrope;color:var(--muted);margin-top:2px}
-.xch button:disabled{opacity:.35}
-.ach{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
-.ach div{aspect-ratio:1;border-radius:16px;background:rgba(0,0,0,.35);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;filter:grayscale(1);opacity:.4;position:relative}
-.ach div small{font:700 9px Manrope;color:var(--muted);margin-top:3px;text-align:center;padding:0 3px;line-height:1.15}
-.ach div.done{filter:none;opacity:1;border-color:rgba(255,122,26,.45);background:linear-gradient(160deg,rgba(255,122,26,.22),rgba(0,0,0,.3))}
-.ach div.done small{color:#ffcf9f}
-.stack-arena{position:fixed;inset:0;z-index:35;display:none;background:radial-gradient(ellipse at 50% 100%,#2a1204 0%,#090504 55%,#030303 100%);touch-action:manipulation;user-select:none;-webkit-user-select:none;cursor:pointer}
-.stack-arena.open{display:block}
-#stackCv{position:absolute;inset:0;width:100%;height:100%}
-.st-score{position:absolute;left:0;right:0;top:calc(70px + env(safe-area-inset-top));text-align:center;font:900 72px Unbounded;letter-spacing:-3px;z-index:3;pointer-events:none;
-  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 30px rgba(255,122,26,.45))}
-.st-sub{position:absolute;left:0;right:0;top:calc(160px + env(safe-area-inset-top));text-align:center;font:700 12px Manrope;letter-spacing:2px;color:var(--muted);z-index:3;pointer-events:none}
-.st-combo{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);font:900 26px Unbounded;color:#ffe08a;z-index:4;pointer-events:none;opacity:0;text-shadow:0 0 24px rgba(255,200,80,.8)}
-.st-combo.show{animation:combo .8s ease-out}
-@keyframes combo{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}25%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}100%{opacity:0;transform:translate(-50%,-90%) scale(1)}}
-.tile-stack{background:linear-gradient(135deg,rgba(40,24,8,.92),rgba(14,14,14,.92));border-color:rgba(255,190,100,.3)}
 .srv-item .st{margin-left:auto;font:800 12px Manrope}
 .srv-item .st.ok{color:var(--green)}.srv-item .st.bad{color:#ff6b6b}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
@@ -595,7 +576,7 @@ nav button.active svg{transform:translateY(-1px) scale(1.08);filter:drop-shadow(
     </div>
     <div class="card" id="partnerCard" style="display:none">
       <div class="row"><b class="sec-title">💼 Партнёрка</b><span class="badge on" id="pPct">20%</span></div>
-      <div class="coin-big" id="pBal" style="font-size:34px">0 ₽</div>
+      <div class="p-big" id="pBal">0 ₽</div>
       <div class="srv-sub" id="pStats">Баланс к выводу</div>
       <div class="kv" style="margin-top:12px">
         <div><b id="pBuyers">0</b><span>Платящих клиентов</span></div>
@@ -709,20 +690,6 @@ const DEMO = {
   ref_link: 'https://t.me/kluxvpn_bot?start=ref0', ref_bonus: 7, invited: 0, bonus_days: 0, support: '', bot: 'kluxvpn_bot',
   keys: [], sub_url: '', device_limit: 3, addon: {devices:2, rub:79, stars:55, active:false, until:''},
   promo: {code:null, pct:0}, partner: null,
-  coins: {coins: 120, per_day: 100, achievements: [
-    {code:'first_buy',emoji:'🛒',title:'Первая покупка',desc:'Оплатил подписку',coins:50,done:false},
-    {code:'year',emoji:'👑',title:'На год вперёд',desc:'Купил тариф на 12 месяцев',coins:150,done:false},
-    {code:'gift',emoji:'🎁',title:'Щедрая душа',desc:'Подарил подписку другу',coins:50,done:false},
-    {code:'friend_paid',emoji:'🤝',title:'Друг с нами',desc:'Друг по твоей ссылке оплатил',coins:50,done:false},
-    {code:'streak7',emoji:'🔥',title:'Неделя подряд',desc:'7 дней подряд крутил колесо',coins:70,done:true},
-    {code:'streak30',emoji:'🌋',title:'Месяц подряд',desc:'30 дней подряд крутил колесо',coins:300,done:false},
-    {code:'hacker',emoji:'💻',title:'Хакер',desc:'30+ очков во «Взломе»',coins:40,done:true},
-    {code:'elite',emoji:'🧠',title:'Элитный хакер',desc:'60+ очков во «Взломе»',coins:100,done:false},
-    {code:'builder',emoji:'🧱',title:'Строитель',desc:'15+ блоков в «Башне»',coins:40,done:false},
-    {code:'architect',emoji:'🏗',title:'Архитектор',desc:'30+ блоков в «Башне»',coins:100,done:false},
-    {code:'lucky',emoji:'🍀',title:'Везунчик',desc:'2+ часа в колесе',coins:60,done:false},
-    {code:'promo',emoji:'🎟',title:'Охотник за промо',desc:'Активировал промокод',coins:20,done:false}]},
-  mini: {allowed:true, rounds:3, rounds_left:3, best:0, round_cap:30, minutes_today:0, daily_cap:120},
 };
 let S = DEMO;
 let method = 'stars', planKey = 'm3', curServer = 0, forGift = false;
@@ -761,7 +728,7 @@ function render(){
   renderWheel();
   renderHub();
   renderKeys();
-  renderCoins();
+  renderPartner();
 
   $('#keyBadge').textContent = a ? 'Активен' : 'Неактивен';
   $('#keyBadge').classList.toggle('on', a);
@@ -1347,8 +1314,8 @@ $('#devBuy').onclick = () => {
   });
 };
 
-// ---------- коины, достижения, партнёрка ----------
-function renderCoins(){
+// ---------- партнёрка ----------
+function renderPartner(){
   const pt = S.partner;
   $('#partnerCard').style.display = pt ? '' : 'none';
   if (pt){
