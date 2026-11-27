@@ -12,6 +12,8 @@ KluxVPN — Telegram-бот + API для мини-апки.
 Переменные окружения (Railway → Variables) — см. README в чате.
 """
 import asyncio
+from types import SimpleNamespace
+import base64
 import hashlib
 import hmac
 import html
@@ -87,6 +89,36 @@ xui = XUI(
     env("XUI_TOKEN"),  # API-токен панели (3X-UI 3.x), можно вместо логина/пароля
 )
 
+xui.name = SERVER_NAME
+
+
+def _load_extra_servers() -> list:
+    """Доп. серверы из переменной XUI_SERVERS (JSON-список). Пример:
+    [{"name":"🇩🇪 Германия","url":"https://1.2.3.4:2053/путь","token":"...","inbound":1,"host":"1.2.3.4"}]"""
+    raw = env("XUI_SERVERS")
+    out = []
+    if not raw:
+        return out
+    try:
+        items = json.loads(raw)
+    except Exception as e:
+        logging.getLogger("klyxvpn").error("XUI_SERVERS: неверный JSON: %s", e)
+        return out
+    for i, it in enumerate(items if isinstance(items, list) else []):
+        x = XUI(it.get("url", ""), it.get("username", ""), it.get("password", ""), int(it.get("inbound", 1) or 1),
+                it.get("host", ""), it.get("token", ""))
+        x.name = it.get("name") or f"Сервер {i + 2}"
+        out.append(x)
+    return out
+
+
+EXTRA_SERVERS = _load_extra_servers()
+
+
+def all_servers() -> list:
+    return [x for x in [xui, *EXTRA_SERVERS] if x.configured]
+
+
 ADMIN_PASSWORD = env("ADMIN_PASSWORD")  # пароль для входа в /admin (необязательно, но очень желательно)
 ADMIN_IDS = {ADMIN_ID} | {int(x) for x in env("ADMIN_IDS").replace(" ", "").split(",") if x.isdigit()}
 crypto = CryptoPay(env("CRYPTOBOT_TOKEN"), env("CRYPTOBOT_TESTNET") == "1")
@@ -110,6 +142,39 @@ PLANS = {
 
 # Цены в рублях (для карты и крипты — крипта считается по курсу от рублёвой цены)
 RUB_PRICES = {"m1": 195, "m3": 495, "m12": 1560}
+
+# Доп. устройства к текущей подписке
+ADDON_DEVICES = int(env("ADDON_DEVICES", "2"))
+ADDON_RUB = int(env("ADDON_RUB", "79"))
+ADDON_STARS = int(env("ADDON_STARS", "55"))
+STAR_RUB = float(env("STAR_RUB", "1.5"))           # примерный курс звезды в рублях (для партнёрки и графика)
+PARTNER_PCT = int(env("PARTNER_PCT", "20"))        # % партнёрам по умолчанию
+PAYOUT_MIN = int(env("PAYOUT_MIN", "500"))         # минимальный вывод партнёра, ₽
+COINS_PER_DAY = int(env("COINS_PER_DAY", "100"))   # сколько Klux-коинов стоит 1 день подписки
+BACKUP_HOUR = int(env("BACKUP_HOUR", "4"))         # во сколько (МСК) присылать бэкап базы
+
+
+def product(key: str) -> dict | None:
+    """Всё, что можно купить: тарифы, подарки (g_m1…), доп. устройства (dev)."""
+    if key in PLANS:
+        n, st, d = PLANS[key]
+        return {"key": key, "kind": "plan", "name": n, "stars": st, "rub": RUB_PRICES[key], "days": d}
+    if key.startswith("g_") and key[2:] in PLANS:
+        base = product(key[2:])
+        return {**base, "key": key, "kind": "gift", "name": f"🎁 Подарок: {base['name']}"}
+    if key == "dev":
+        return {"key": "dev", "kind": "devices", "name": f"+{ADDON_DEVICES} устройства", "stars": ADDON_STARS,
+                "rub": ADDON_RUB, "days": 0}
+    return None
+
+
+def price_for(key: str, uid: int) -> tuple[int, int, int, str | None]:
+    """Цена с учётом промокода: (звёзды, рубли, скидка %, код)."""
+    p = product(key)
+    u = db.get_user(uid)
+    pct = (u["promo_pct"] or 0) if u and p["kind"] in ("plan", "gift") else 0
+    code = u["promo_code"] if pct else None
+    return max(1, round(p["stars"] * (100 - pct) / 100)), max(1, round(p["rub"] * (100 - pct) / 100)), pct, code
 
 CRYPTO_HELP = (
     "🪙 <b>Как оплатить криптой, если её нет</b>\n\n"
@@ -279,16 +344,106 @@ async def key_for(u) -> str | None:
         return None
 
 
+_link_cache: dict[tuple[int, int, str], str] = {}
+
+
+async def keys_for(u) -> list[tuple[str, str]]:
+    """[(название сервера, ключ)] по всем серверам."""
+    out = []
+    if not (u and u["uuid"]):
+        return out
+    main_key = await key_for(u)
+    if main_key:
+        out.append((xui.name, main_key))
+    for i, x in enumerate(EXTRA_SERVERS, start=1):
+        if not x.configured:
+            continue
+        ck = (i, u["id"], u["uuid"])
+        if ck not in _link_cache:
+            try:
+                cu = await x.get_uuid(u["id"])
+                if cu:
+                    _link_cache[ck] = await x.link(cu, u["id"], f"KluxVPN {x.name}")
+            except Exception as e:
+                log.warning("Ключ %s для %s: %s", x.name, u["id"], e)
+        if ck in _link_cache:
+            out.append((x.name, _link_cache[ck]))
+    return out
+
+
+def sub_token(uid: int, reset: bool = False) -> str:
+    u = db.get_user(uid)
+    tok = u["sub_token"] if u else None
+    if reset or not tok:
+        tok = secrets.token_urlsafe(16)
+        db.set_field(uid, "sub_token", tok)
+    return tok
+
+
+def sub_url(u) -> str:
+    if not (PUBLIC_URL and u and u["uuid"] and is_active(u)):
+        return ""
+    return f"{PUBLIC_URL}/sub/{sub_token(u['id'])}"
+
+
+async def sync_extra_servers(u):
+    """Создаёт/продлевает клиента на всех доп. серверах (ошибка одного сервера не ломает остальные)."""
+    for x in EXTRA_SERVERS:
+        if not x.configured:
+            continue
+        try:
+            cu = await x.get_uuid(u["id"])
+            if cu:
+                await x.update_client(cu, u["id"], u["expires_at"], device_limit(u))
+            else:
+                await x.create_client(u["id"], u["expires_at"], device_limit(u), client_uuid=u["uuid"])
+        except Exception as e:
+            log.error("Сервер %s, клиент %s: %s", x.name, u["id"], e)
+
+
+# статус серверов для мини-апки и админки
+SERVER_STATUS: dict[str, dict] = {}
+
+
+async def servers_status_loop():
+    while True:
+        for x in all_servers():
+            t0 = time.perf_counter()
+            try:
+                await x.inbound(refresh=True)
+                SERVER_STATUS[x.name] = {"ok": True, "ms": round((time.perf_counter() - t0) * 1000), "at": int(time.time())}
+            except Exception as e:
+                SERVER_STATUS[x.name] = {"ok": False, "ms": 0, "at": int(time.time()), "err": str(e)[:120]}
+        await asyncio.sleep(60)
+
+
+def servers_payload() -> list[dict]:
+    res = []
+    for x in all_servers() or [xui]:
+        st = SERVER_STATUS.get(x.name, {})
+        res.append({"name": x.name, "protocol": "VLESS Reality", "ok": st.get("ok", True), "ms": st.get("ms", 0)})
+    return res
+
+
+def device_limit(u) -> int:
+    extra = u["extra_devices"] or 0
+    return DEVICES + (extra if extra and (u["extra_until"] or 0) > time.time() else 0)
+
+
 async def sync_user(uid: int):
     """Отправляет в панель 3X-UI текущий срок подписки пользователя (создаёт ключ, если его нет)."""
     if not xui.configured:
         raise RuntimeError("Панель 3X-UI не настроена (XUI_URL / XUI_USERNAME / XUI_PASSWORD)")
     u = db.get_user(uid)
+    for k in [k for k in _link_cache if k[1] == uid]:
+        _link_cache.pop(k, None)
+    limit = device_limit(u)
     if u["uuid"]:
-        await xui.update_client(u["uuid"], uid, u["expires_at"], DEVICES)
+        await xui.update_client(u["uuid"], uid, u["expires_at"], limit)
     else:
-        new_uuid = await xui.create_client(uid, u["expires_at"], DEVICES)
+        new_uuid = await xui.create_client(uid, u["expires_at"], limit)
         db.set_uuid(uid, new_uuid)
+    await sync_extra_servers(db.get_user(uid))
 
 
 async def add_days(uid: int, days: int) -> tuple[bool, str | None]:
@@ -309,13 +464,19 @@ async def add_days(uid: int, days: int) -> tuple[bool, str | None]:
 
 
 async def make_invoice_link(plan_key: str, uid: int) -> str:
-    name, stars, days = PLANS[plan_key]
+    p = product(plan_key)
+    stars, _, pct, _ = price_for(plan_key, uid)
+    desc = {"plan": f"Доступ к VPN на {p['name']}. Безлимитный трафик, до {DEVICES} устройств.",
+            "gift": f"Подарочная подписка KluxVPN. После оплаты получишь код для друга.",
+            "devices": f"+{ADDON_DEVICES} устройства к текущей подписке до её окончания."}[p["kind"]]
+    if pct:
+        desc += f" Скидка по промокоду {pct}%."
     return await pay_bot.create_invoice_link(
-        title=f"KluxVPN — {name}",
-        description=f"Доступ к VPN на {name}. Безлимитный трафик, до {DEVICES} устройств.",
+        title=f"KluxVPN — {p['name']}"[:32],
+        description=desc[:255],
         payload=f"{plan_key}:{uid}",
         currency="XTR",
-        prices=[LabeledPrice(label=name, amount=stars)],
+        prices=[LabeledPrice(label=p["name"][:32], amount=stars)],
     )
 
 
@@ -346,9 +507,14 @@ def home_kb(u) -> InlineKeyboardMarkup:
     if TRIAL_DAYS and u and not u["trial_used"] and not is_active(u):
         rows.append([InlineKeyboardButton(text=f"🎁 Попробовать бесплатно ({TRIAL_DAYS} дн.)", callback_data="trial")])
     rows.append([
-        InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="ref"),
-        InlineKeyboardButton(text="💬 Поддержка", callback_data="support"),
+        InlineKeyboardButton(text="🎟 Промокод", callback_data="promo"),
+        InlineKeyboardButton(text="🎁 Подарить", callback_data="gift"),
     ])
+    rows.append([
+        InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="ref"),
+        InlineKeyboardButton(text="🏆 Награды", callback_data="coins"),
+    ])
+    rows.append([InlineKeyboardButton(text="💬 Поддержка", callback_data="support")])
     if docs_row():
         rows.append(docs_row())
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -376,6 +542,8 @@ def plans_kb() -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(
         text=f"{name} — {stars} ⭐" + (f" / {RUB_PRICES[k]} ₽" if len(methods()) > 1 else ""),
         callback_data=f"plan:{k}")] for k, (name, stars, _) in PLANS.items()]
+    rows.append([InlineKeyboardButton(text="🎟 Есть промокод", callback_data="promo"),
+                 InlineKeyboardButton(text="🎁 В подарок", callback_data="gift")])
     rows.append([InlineKeyboardButton(text="« В меню", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -414,19 +582,28 @@ async def key_text(u) -> tuple[str, InlineKeyboardMarkup]:
             "🔑 У тебя пока нет активной подписки.\n\nКупи тариф или попробуй бесплатно — ключ придёт сразу.",
             back_kb([InlineKeyboardButton(text="🔥 Купить подписку", callback_data="buy")]),
         )
-    link = await key_for(u)
-    if not link:
+    keys = await keys_for(u)
+    if not keys:
         return (
             f"🔑 Подписка активна до <b>{fmt_date(u['expires_at'])}</b>, но ключ ещё готовится.\n"
             f"Если через пару минут не появится — {support_text()}",
             back_kb(),
         )
-    return (
-        f"🔑 <b>Твой ключ</b> (нажми, чтобы скопировать):\n\n<code>{esc(link)}</code>\n\n"
-        f"🗓 Действует до <b>{fmt_date(u['expires_at'])}</b> (осталось {days_left(u)} дн.)\n"
-        f"📱 До {DEVICES} устройств · ⚠️ никому не передавай ключ",
-        back_kb([InlineKeyboardButton(text="📱 Как подключить", callback_data="guide")]),
-    )
+    parts = ["🔑 <b>Твой ключ</b> (нажми, чтобы скопировать):\n"]
+    for name, link in keys:
+        parts.append((f"{esc(name)}:\n" if len(keys) > 1 else "") + f"<code>{esc(link)}</code>\n")
+    su = sub_url(u)
+    if su:
+        parts.append(f"🔗 <b>Ссылка-подписка</b> — добавь один раз в Hiddify / v2RayTun, "
+                     f"и новые серверы будут появляться сами:\n<code>{esc(su)}</code>\n")
+    parts.append(f"🗓 Действует до <b>{fmt_date(u['expires_at'])}</b> (осталось {days_left(u)} дн.)\n"
+                 f"📱 До {device_limit(u)} устройств · ⚠️ никому не передавай ключ")
+    rows = [[InlineKeyboardButton(text="📱 Как подключить", callback_data="guide")]]
+    if not ((u["extra_devices"] or 0) and (u["extra_until"] or 0) > time.time()):
+        rows.append([InlineKeyboardButton(text=f"➕ Ещё {ADDON_DEVICES} устройства", callback_data="devices")])
+    if su:
+        rows.append([InlineKeyboardButton(text="🔄 Новая ссылка-подписка (если утекла)", callback_data="subreset")])
+    return "\n".join(parts), back_kb(*rows)
 
 
 BANNER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -655,6 +832,11 @@ async def cmd_start(message: Message, command: CommandObject):
     if command.args and command.args.startswith("ref") and command.args[3:].isdigit():
         referrer = int(command.args[3:])
     u, is_new = ensure_user(message.from_user, referrer)
+    if command.args and command.args.startswith(("gift_", "promo_")):
+        code = command.args.split("_", 1)[1]
+        ok, msg = await apply_promo(u["id"], ("GIFT-" + code[5:]) if code.upper().startswith("GIFT-") else code)
+        await message.answer(msg, parse_mode="HTML")
+        u = db.get_user(u["id"])
     if is_new:
         await send_sticker(message.from_user.id, "hello")
         if db.get_setting("notify_new", "1") == "1":
@@ -794,36 +976,50 @@ async def cb_buy(call: CallbackQuery):
 @main_r.callback_query(F.data.startswith("plan:"))
 async def cb_plan(call: CallbackQuery):
     key = call.data.split(":", 1)[1]
-    if key not in PLANS:
+    p = product(key)
+    if not p:
         return await call.answer("Тариф не найден", show_alert=True)
-    ensure_user(call.from_user)
+    u, _ = ensure_user(call.from_user)
+    if p["kind"] == "devices" and not is_active(u):
+        return await call.answer("Сначала нужна активная подписка", show_alert=True)
     if len(methods()) == 1:
         return await start_payment(call, "stars", key)
-    name, stars, _ = PLANS[key]
+    stars, rub, pct, code = price_for(key, call.from_user.id)
     rows = []
     for m in methods():
-        price = f"{stars} ⭐" if m == "stars" else f"{RUB_PRICES[key]} ₽"
+        price = f"{stars} ⭐" if m == "stars" else f"{rub} ₽"
         rows.append([InlineKeyboardButton(text=f"{METHOD_NAMES[m]} — {price}", callback_data=f"pay:{m}:{key}")])
-    rows.append([InlineKeyboardButton(text="« Другой тариф", callback_data="buy")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="buy" if p["kind"] == "plan" else "home")])
     hint = "\n\n🪙 Нет крипты? Не страшно — внутри будет пошаговая инструкция, как купить её за рубли." if "crypto" in methods() else ""
-    await edit_or_send(call, f"🧾 <b>Тариф: {name}</b>\n\nВыбери способ оплаты:{hint}", InlineKeyboardMarkup(inline_keyboard=rows), "pay")
+    disc = f"\n🎟 Промокод <b>{esc(code)}</b>: скидка {pct}%" if pct else ""
+    await edit_or_send(call, f"🧾 <b>{p['name']}</b>{disc}\n\nВыбери способ оплаты:{hint}", InlineKeyboardMarkup(inline_keyboard=rows), "pay")
     await call.answer()
 
 
 @main_r.callback_query(F.data.startswith("pay:"))
 async def cb_pay(call: CallbackQuery):
     _, method, key = call.data.split(":", 2)
-    if key not in PLANS or method not in methods():
+    if not product(key) or method not in methods():
         return await call.answer("Способ оплаты недоступен", show_alert=True)
     await start_payment(call, method, key)
 
 
 async def create_payment(method: str, key: str, uid: int) -> tuple[str, str | None]:
     """Создаёт счёт. Возвращает (ссылка, id_счёта или None для Stars)."""
-    name, stars, _ = PLANS[key]
+    p = product(key)
+    name = p["name"]
+    if p["kind"] == "devices" and not is_active(db.get_user(uid)):
+        raise ValueError("нет активной подписки")
     if method == "stars":
         return await make_invoice_link(key, uid), None
-    rub = RUB_PRICES[key]
+    _, rub, _, code = price_for(key, uid)
+    link, inv = await _create_rub_payment(method, key, uid, name, rub)
+    if code and inv:
+        db.invoice_set_promo(inv, code)
+    return link, inv
+
+
+async def _create_rub_payment(method: str, key: str, uid: int, name: str, rub: int) -> tuple[str, str | None]:
     if method == "crypto":
         inv_id, url, _ = await crypto.create_invoice(rub, f"{key}:{uid}", f"KluxVPN — {name}")
         db.add_invoice(f"cb_{inv_id}", uid, key, "crypto", rub, "RUB")
@@ -844,14 +1040,15 @@ async def create_payment(method: str, key: str, uid: int) -> tuple[str, str | No
 
 
 async def start_payment(call: CallbackQuery, method: str, key: str):
-    name, stars, _ = PLANS[key]
+    name = product(key)["name"]
+    stars, rub, pct, _ = price_for(key, call.from_user.id)
     try:
         link, inv_id = await create_payment(method, key, call.from_user.id)
     except Exception as e:
         log.error("Ошибка создания счёта (%s): %s", method, e)
         return await call.answer("Не получилось создать счёт, попробуй другой способ", show_alert=True)
     await call.answer()
-    price = f"{stars} ⭐" if method == "stars" else f"{RUB_PRICES[key]} ₽"
+    price = f"{stars} ⭐" if method == "stars" else f"{rub} ₽"
     hints = {
         "stars": "Нажми кнопку ниже — откроется оплата звёздами.",
         "crypto": "Откроется @CryptoBot — оплати в USDT, TON, BTC или другой монете. Сумма считается по курсу.",
@@ -969,6 +1166,13 @@ async def cb_trial(call: CallbackQuery):
 @main_r.callback_query(F.data == "ref")
 async def cb_ref(call: CallbackQuery):
     u, _ = ensure_user(call.from_user)
+    if u["partner_pct"]:
+        share = f"https://t.me/share/url?url={quote(ref_link(u['id']))}&text={quote('Быстрый VPN, которым пользуюсь сам 👇')}"
+        rows = [[InlineKeyboardButton(text="🔗 Поделиться", url=share)]]
+        if (u["partner_balance"] or 0) >= PAYOUT_MIN:
+            rows.append([InlineKeyboardButton(text=f"💸 Вывести {u['partner_balance']} ₽", callback_data="payout")])
+        await edit_or_send(call, partner_text(u), back_kb(*rows), "ref")
+        return await call.answer()
     text = (
         "🤝 <b>Приглашай друзей — получай дни бесплатно</b>\n\n"
         f"За каждого друга, который оплатит подписку, ты получишь <b>+{REF_BONUS_DAYS} дн.</b>\n\n"
@@ -988,7 +1192,8 @@ async def cb_support(call: CallbackQuery):
         f"💬 <b>Поддержка</b>\n\nПиши: {support_text()}\nОбычно отвечаем в течение пары часов.\n\n"
         "Перед вопросом проверь:\n• подписка активна (🔑 Мой ключ)\n• ключ вставлен целиком\n• в приложении включён VPN"
         + (f"\n\n🔖 Кодовое слово: <code>{esc(CODE_WORD)}</code>" if CODE_WORD else ""),
-        back_kb(*([docs_row()] if docs_row() else [])),
+        back_kb([InlineKeyboardButton(text="✉️ Написать в поддержку", callback_data="ticket")],
+                *([docs_row()] if docs_row() else [])),
         "support",
     )
 
@@ -997,63 +1202,126 @@ async def cb_support(call: CallbackQuery):
 @pay_r.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery):
     key = query.invoice_payload.split(":", 1)[0]
-    await query.answer(ok=key in PLANS, error_message=None if key in PLANS else "Тариф не найден, попробуй ещё раз")
+    ok = product(key) is not None
+    await query.answer(ok=ok, error_message=None if ok else "Тариф не найден, попробуй ещё раз")
 
 
-async def fulfill_payment(uid: int, key: str, amount: int, currency: str, charge_id: str, via: str, payer: str = ""):
-    """Зачисляет оплату: продлевает подписку, шлёт ключ, начисляет бонус пригласившему, сообщает админу."""
+async def fulfill_payment(uid: int, key: str, amount: int, currency: str, charge_id: str, via: str, payer: str = "",
+                          promo: str | None = None):
+    """Зачисляет оплату: тариф / подарок / доп. устройства, промокод, партнёрка, коины, уведомление админу."""
     if db.payment_exists(charge_id):
         return
-    name, _, days = PLANS.get(key, ("?", 0, 30))
+    p = product(key) or product("m1")
     if not db.get_user(uid):
         db.upsert_user(uid, None, None)
+    u0 = db.get_user(uid)
     first_payment = db.paid_count(uid) == 0
     db.add_payment(uid, key, amount, currency, charge_id)
-    ok, link = await add_days(uid, days)
-    u = db.get_user(uid)
-
-    if ok and link:
-        text = (
-            f"🔥 <b>Оплата прошла!</b> Тариф: {name}\n"
-            f"🗓 Подписка до <b>{fmt_date(u['expires_at'])}</b>\n\n"
-            f"🔑 Твой ключ (нажми, чтобы скопировать):\n<code>{esc(link)}</code>\n\n"
-            "Не знаешь, куда вставить? Жми «Как подключить» 👇"
-        )
-    else:
-        text = (
-            f"🔥 <b>Оплата прошла!</b> Подписка до <b>{fmt_date(u['expires_at'])}</b>.\n\n"
-            f"Ключ готовится — он появится в «🔑 Мой ключ» через пару минут. Если нет — {support_text()}"
-        )
+    rub_value = amount if currency == "RUB" else round(amount * STAR_RUB) if currency == "XTR" else amount
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 Как подключить", callback_data="guide")],
         [InlineKeyboardButton(text="« В меню", callback_data="home")],
     ])
+
+    # промокод со скидкой «сгорает» после оплаты
+    code = promo or (u0["promo_code"] if p["kind"] in ("plan", "gift") and u0["promo_pct"] else None)
+    if code and p["kind"] in ("plan", "gift"):
+        db.promo_add_revenue(code, uid, rub_value)
+        db.set_field(uid, "promo_code", None)
+        db.set_field(uid, "promo_pct", 0)
+
+    if p["kind"] == "plan":
+        ok, link = await add_days(uid, p["days"])
+        u = db.get_user(uid)
+        if ok and link:
+            text = (
+                f"🔥 <b>Оплата прошла!</b> Тариф: {p['name']}\n"
+                f"🗓 Подписка до <b>{fmt_date(u['expires_at'])}</b>\n\n"
+                f"🔑 Твой ключ (нажми, чтобы скопировать):\n<code>{esc(link)}</code>\n\n"
+                + (f"🔗 Или ссылка-подписка для Hiddify / v2RayTun:\n<code>{esc(sub_url(u))}</code>\n\n" if sub_url(u) else "")
+                + "Не знаешь, куда вставить? Жми «Как подключить» 👇"
+            )
+        else:
+            text = (
+                f"🔥 <b>Оплата прошла!</b> Подписка до <b>{fmt_date(u['expires_at'])}</b>.\n\n"
+                f"Ключ готовится — он появится в «🔑 Мой ключ» через пару минут. Если нет — {support_text()}"
+            )
+    elif p["kind"] == "gift":
+        gcode = "GIFT-" + secrets.token_hex(4).upper()
+        db.promo_create(gcode, "days", p["days"], max_uses=1, note=f"подарок от {uid}")
+        link = f"https://t.me/{MAIN_USERNAME}?start=gift_{gcode}"
+        share = f"https://t.me/share/url?url={quote(link)}&text={quote('Дарю тебе VPN KluxVPN 🎁 Жми, чтобы активировать:')}"
+        text = (
+            f"🎁 <b>Подарок оплачен!</b> {p['name']}\n\n"
+            f"Код подарка: <code>{gcode}</code>\n"
+            f"Ссылка для друга:\n<code>{link}</code>\n\n"
+            "Отправь её другу — по ней он сразу получит подписку. Код одноразовый."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Отправить другу", url=share)],
+            [InlineKeyboardButton(text="« В меню", callback_data="home")],
+        ])
+    else:  # доп. устройства
+        u = db.get_user(uid)
+        db.set_field(uid, "extra_devices", ADDON_DEVICES)
+        db.set_field(uid, "extra_until", u["expires_at"])
+        try:
+            await sync_user(uid)
+        except Exception as e:
+            log.error("Доп. устройства %s: %s", uid, e)
+        text = (f"📱 <b>Готово!</b> Теперь можно подключить до <b>{DEVICES + ADDON_DEVICES} устройств</b> "
+                f"до {fmt_date(u['expires_at'])}.\nКлюч тот же — просто вставь его на новых устройствах.")
+
     await send_sticker(uid, "paid")
     try:
         await send_screen(uid, "success", text, kb)
     except Exception as e:
-        log.warning("Не удалось отправить ключ %s: %s", uid, e)
+        log.warning("Не удалось отправить сообщение об оплате %s: %s", uid, e)
 
-    if first_payment and u["referrer"] and not u["ref_paid"] and REF_BONUS_DAYS:
+    # партнёрка: % с каждой оплаты / обычная рефералка: дни за первую оплату
+    u = db.get_user(uid)
+    ref = db.get_user(u["referrer"]) if u["referrer"] else None
+    if ref and (ref["partner_pct"] or 0) > 0:
+        earn = rub_value * ref["partner_pct"] // 100
+        if earn > 0:
+            db.partner_credit(ref["id"], uid, earn, charge_id)
+            try:
+                await main_bot.send_message(ref["id"], f"💸 Партнёрка: +{earn} ₽ за оплату твоего реферала. Баланс: "
+                                                       f"{db.get_user(ref['id'])['partner_balance']} ₽")
+            except Exception:
+                pass
+        if first_payment and not u["ref_paid"]:
+            db.mark(uid, "ref_paid")
+    elif first_payment and ref and not u["ref_paid"] and REF_BONUS_DAYS:
         db.mark(uid, "ref_paid")
-        db.add_bonus_days(u["referrer"], REF_BONUS_DAYS)
-        await add_days(u["referrer"], REF_BONUS_DAYS)
+        db.add_bonus_days(ref["id"], REF_BONUS_DAYS)
+        await add_days(ref["id"], REF_BONUS_DAYS)
         try:
-            await send_sticker(u["referrer"], "friends")
-            await main_bot.send_message(u["referrer"], f"🎉 Твой друг оплатил подписку — тебе +{REF_BONUS_DAYS} дн. KluxVPN!")
+            await send_sticker(ref["id"], "friends")
+            await main_bot.send_message(ref["id"], f"🎉 Твой друг оплатил подписку — тебе +{REF_BONUS_DAYS} дн. KluxVPN!")
         except Exception:
             pass
+    if ref:
+        await award(ref["id"], "friend_paid")
+
+    await award(uid, "first_buy")
+    if p["kind"] == "gift":
+        await award(uid, "gift")
+    if p["key"] == "m12":
+        await award(uid, "year")
 
     cur = "⭐" if currency == "XTR" else ("₽" if currency == "RUB" else currency)
     extra = f"\nВозврат: <code>/refund {uid} {charge_id}</code>" if currency == "XTR" else ""
     who = esc(payer or (u["name"] or "")) + (f" (@{esc(u['username'])})" if u["username"] else "")
-    await notify_admin(f"💰 <b>Оплата: {amount} {cur}</b> — {name} · {via}\nОт: {who} <code>{uid}</code>{extra}")
+    pr = f"\n🎟 Промокод: {esc(code)}" if code else ""
+    await notify_admin(f"💰 <b>Оплата: {amount} {cur}</b> — {esc(p['name'])} · {via}\nОт: {who} <code>{uid}</code>{pr}{extra}")
 
 
 async def fulfill_invoice(inv, via: str):
     if not db.set_invoice_status(inv["id"], "paid"):
         return  # уже зачислено
-    await fulfill_payment(inv["user_id"], inv["plan"], inv["amount"], inv["currency"], inv["id"], via)
+    await fulfill_payment(inv["user_id"], inv["plan"], inv["amount"], inv["currency"], inv["id"], via,
+                          promo=inv["promo"] if "promo" in inv.keys() else None)
 
 
 @pay_r.message(F.successful_payment)
@@ -1145,7 +1413,10 @@ def admin_kb() -> InlineKeyboardMarkup:
         [b("👥 Пользователи", "adm:ul:all:0"), b("🔎 Найти", "adm:find")],
         [b("🎁 Выдать дни", "adm:give"), b("📢 Рассылка", "adm:bc")],
         [b("🕵️ Шаринг ключей", "adm:share"), b("🌍 Страны", "adm:countries")],
-        [b("📥 Выгрузить CSV", "adm:csv"), b("🖥 Проверить сервер", "adm:srv")],
+        [b("📈 Доходы", "adm:rev"), b(f"📨 Тикеты ({len(db.tickets_list('open', 99))})", "adm:tickets")],
+        [b("🎟 Промокоды", "adm:promos"), b(f"💼 Партнёры" + (f" ({len(db.payouts_open())})" if db.payouts_open() else ""), "adm:partners")],
+        [b("📥 Выгрузить CSV", "adm:csv"), b("🖥 Проверить серверы", "adm:srv")],
+        [b("📦 Бэкап базы", "adm:backup")],
         [b(("🔔" if db.get_setting("notify_new", "1") == "1" else "🔕") + " Уведомления о новых", "adm:notify")],
     ])
 
@@ -1157,6 +1428,8 @@ ADMIN_HELP = (
     "<code>/give ID ДНИ</code> — выдать/продлить подписку\n"
     "<code>/sync ID</code> — повторно отправить ключ в панель\n"
     "<code>/refund ID CHARGE_ID</code> — вернуть звёзды\n"
+    "<code>/promo</code> — промокоды (add / off / list)\n"
+    "<code>/partner ID 20</code> — сделать партнёром с 20% · <code>/partner list</code>\n"
     "<code>/stickers</code> — создать стикерпак KluxVPN\n"
     "<code>/icons</code> — включить свои иконки на кнопках (нужен Premium)\n"
     "<code>/logout</code> — выйти из админки"
@@ -1321,7 +1594,12 @@ async def connections_block(u) -> str:
     lines = []
     if u["uuid"] and xui.configured:
         try:
-            ips = await xui.client_ips(u["id"])
+            ips = []
+            for x in all_servers():
+                try:
+                    ips += [ip for ip in await x.client_ips(u["id"]) if ip not in ips]
+                except Exception:
+                    pass
             tr = await xui.client_traffic(u["id"])
         except Exception as e:
             ips, tr = [], {}
@@ -1526,7 +1804,12 @@ async def adm_share(call: CallbackQuery):
     found = []
     for uid in ids:
         try:
-            ips = await xui.client_ips(uid)
+            ips = []
+            for x in all_servers():
+                try:
+                    ips += [ip for ip in await x.client_ips(uid) if ip not in ips]
+                except Exception:
+                    pass
         except Exception:
             continue
         if len(ips) > DEVICES:
@@ -1619,7 +1902,13 @@ async def adm_srv(call: CallbackQuery):
     if not xui.configured:
         return await call.message.answer("❌ Панель не настроена: добавь XUI_URL, XUI_USERNAME, XUI_PASSWORD (или XUI_TOKEN) в Railway")
     try:
-        await call.message.answer(await xui.ping())
+        lines = []
+        for x in all_servers():
+            try:
+                lines.append(f"<b>{esc(x.name)}</b>\n{esc(await x.ping())}")
+            except Exception as e:
+                lines.append(f"<b>{esc(x.name)}</b>\n❌ {esc(e)}")
+        await call.message.answer("\n\n".join(lines) or "Серверы не настроены", parse_mode="HTML")
     except Exception as e:
         await call.message.answer(f"❌ Панель недоступна: {esc(e)}", parse_mode="HTML")
 
@@ -1828,10 +2117,11 @@ async def clear_ips_loop():
         try:
             if xui.configured:
                 for uid in db.active_user_ids():
-                    try:
-                        await xui.clear_ips(uid)
-                    except Exception:
-                        pass
+                    for x in all_servers():
+                        try:
+                            await x.clear_ips(uid)
+                        except Exception:
+                            pass
                 log.info("🧹 Журнал IP подключений очищен")
         except Exception as e:
             log.error("clear_ips_loop: %s", e)
@@ -1855,6 +2145,591 @@ async def reminders_loop():
         except Exception as e:
             log.error("reminders: %s", e)
         await asyncio.sleep(1800)
+
+
+
+# ======================= v2: коины, достижения, промокоды, подарки, партнёрка, тикеты =======================
+class UserSG(StatesGroup):
+    promo = State()
+    ticket = State()
+    payout = State()
+
+
+class AdminSG2(StatesGroup):
+    ticket_reply = State()
+
+
+# код: (эмодзи, название, за что, коины)
+ACHIEVEMENTS = {
+    "first_buy": ("🛒", "Первая покупка", "Оплатил подписку", 50),
+    "year": ("👑", "На год вперёд", "Купил тариф на 12 месяцев", 150),
+    "gift": ("🎁", "Щедрая душа", "Подарил подписку другу", 50),
+    "friend_paid": ("🤝", "Друг с нами", "Друг по твоей ссылке оплатил", 50),
+    "streak7": ("🔥", "Неделя подряд", "7 дней подряд крутил колесо", 70),
+    "streak30": ("🌋", "Месяц подряд", "30 дней подряд крутил колесо", 300),
+    "hacker": ("💻", "Хакер", "Набрал 30+ очков во «Взломе сервера»", 40),
+    "elite": ("🧠", "Элитный хакер", "Набрал 60+ очков во «Взломе сервера»", 100),
+    "lucky": ("🍀", "Везунчик", "Выиграл 2+ часа в колесе", 60),
+    "promo": ("🎟", "Охотник за промо", "Активировал промокод", 20),
+}
+WHEEL_COINS = int(env("WHEEL_COINS", "5"))   # коины за каждый спин колеса
+
+
+async def award(uid: int, code: str) -> bool:
+    """Выдаёт достижение (один раз) и коины за него."""
+    if code not in ACHIEVEMENTS or not db.get_user(uid) or not db.ach_add(uid, code):
+        return False
+    emo, title, desc, coins = ACHIEVEMENTS[code]
+    total = db.coins_add(uid, coins, f"ach:{code}")
+    try:
+        await main_bot.send_message(uid, f"🏆 <b>Новое достижение!</b>\n\n{emo} <b>{title}</b> — {desc}\n"
+                                         f"+{coins} 🪙 Klux-коинов (всего {total})", parse_mode="HTML")
+    except Exception:
+        pass
+    return True
+
+
+def coins_payload(u) -> dict:
+    got = db.ach_list(u["id"])
+    return {
+        "coins": u["coins"] or 0, "per_day": COINS_PER_DAY,
+        "achievements": [{"code": c, "emoji": e, "title": t, "desc": d, "coins": k, "done": c in got}
+                         for c, (e, t, d, k) in ACHIEVEMENTS.items()],
+    }
+
+
+async def exchange_coins(uid: int, days: int) -> tuple[bool, str]:
+    if days < 1:
+        return False, "Укажи количество дней"
+    cost = days * COINS_PER_DAY
+    if not db.coins_spend(uid, cost, f"exchange:{days}d"):
+        return False, f"Не хватает коинов: нужно {cost} 🪙"
+    ok, _ = await add_days(uid, days)
+    return True, f"Обменял {cost} 🪙 на +{days} дн. подписки!"
+
+
+# ---------- промокоды ----------
+async def apply_promo(uid: int, code: str) -> tuple[bool, str]:
+    code = (code or "").strip().upper()
+    if code.startswith("GIFT_"):
+        code = "GIFT-" + code[5:]
+    p = db.promo_get(code) if code else None
+    if not p or not p["active"]:
+        return False, "Такого промокода нет 🤔"
+    if p["expires_at"] and p["expires_at"] < time.time():
+        return False, "Срок действия промокода закончился"
+    if p["max_uses"] and p["used"] >= p["max_uses"]:
+        return False, "Промокод уже закончился" if not code.startswith("GIFT-") else "Этот подарок уже активировали"
+    if db.promo_used_by(code, uid):
+        return False, "Ты уже использовал этот промокод"
+    if p["kind"] == "days" and p["note"] and p["note"] == f"подарок от {uid}":
+        return False, "Это твой подарок — отправь ссылку другу 🙂"
+    if not db.promo_use(code, uid):
+        return False, "Промокод уже закончился"
+    if p["partner_id"]:
+        db.set_referrer_if_empty(uid, p["partner_id"])
+    if not code.startswith("GIFT-"):
+        await award(uid, "promo")
+    if p["kind"] == "pct":
+        db.set_field(uid, "promo_code", code)
+        db.set_field(uid, "promo_pct", int(p["value"]))
+        return True, f"🎟 Промокод <b>{esc(code)}</b> применён: скидка <b>{p['value']}%</b> на следующую оплату подписки!"
+    ok, _ = await add_days(uid, int(p["value"]))
+    u = db.get_user(uid)
+    what = "🎁 Подарок активирован" if code.startswith("GIFT-") else f"🎟 Промокод <b>{esc(code)}</b> активирован"
+    return True, f"{what}: <b>+{p['value']} дн.</b> подписки! Действует до {fmt_date(u['expires_at'])}"
+
+
+@main_r.message(Command("promo"))
+async def cmd_promo_user(message: Message, command: CommandObject, state: FSMContext):
+    ensure_user(message.from_user)
+    if command.args and not (message.from_user.id in ADMIN_IDS and command.args.split()[0].lower() in ("add", "off", "on", "list")):
+        ok, msg = await apply_promo(message.from_user.id, command.args)
+        return await message.answer(msg, parse_mode="HTML")
+    if message.from_user.id in ADMIN_IDS and command.args:
+        return await admin_promo_cmd(message, command.args)
+    await state.set_state(UserSG.promo)
+    await message.answer("🎟 Отправь промокод одним сообщением:")
+
+
+@main_r.callback_query(F.data == "promo")
+async def cb_promo(call: CallbackQuery, state: FSMContext):
+    await state.set_state(UserSG.promo)
+    await call.answer()
+    u = db.get_user(call.from_user.id)
+    cur = f"\n\nСейчас активен: <b>{esc(u['promo_code'])}</b> (−{u['promo_pct']}%)" if u and u["promo_pct"] else ""
+    await call.message.answer(f"🎟 <b>Промокод</b>\n\nОтправь его одним сообщением — скидка или бонусные дни применятся сразу.{cur}",
+                              parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                  InlineKeyboardButton(text="✖️ Отмена", callback_data="cancel_state")]]))
+
+
+@main_r.callback_query(F.data == "cancel_state")
+async def cb_cancel_state(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.answer("Отменено")
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+
+
+@main_r.message(UserSG.promo, F.text)
+async def promo_input(message: Message, state: FSMContext):
+    if message.text.startswith("/"):
+        return await state.clear()
+    await state.clear()
+    ok, msg = await apply_promo(message.from_user.id, message.text)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔥 К тарифам", callback_data="buy")]]) if ok else None
+    await message.answer(msg, parse_mode="HTML", reply_markup=kb)
+
+
+# ---------- подарки ----------
+@main_r.callback_query(F.data == "gift")
+async def cb_gift(call: CallbackQuery):
+    ensure_user(call.from_user)
+    rows = []
+    for k, (n, st, d) in PLANS.items():
+        stars, rub, _, _ = price_for(f"g_{k}", call.from_user.id)
+        price = f"{stars} ⭐" + (f" / {rub} ₽" if len(methods()) > 1 else "")
+        rows.append([InlineKeyboardButton(text=f"🎁 {n} — {price}", callback_data=f"plan:g_{k}")])
+    await edit_or_send(call, "🎁 <b>Подари VPN другу</b>\n\nВыбери срок. После оплаты придёт ссылка-подарок — "
+                             "отправь её другу, и он сразу получит подписку.", back_kb(*rows), "plans")
+    await call.answer()
+
+
+# ---------- доп. устройства ----------
+@main_r.callback_query(F.data == "devices")
+async def cb_devices(call: CallbackQuery):
+    u, _ = ensure_user(call.from_user)
+    if not is_active(u):
+        return await call.answer("Сначала нужна активная подписка", show_alert=True)
+    if (u["extra_devices"] or 0) and (u["extra_until"] or 0) > time.time():
+        return await call.answer(f"У тебя уже {device_limit(u)} устройств до {fmt_date(u['extra_until'])}", show_alert=True)
+    await call.answer()
+    price = f"{ADDON_STARS} ⭐" + (f" / {ADDON_RUB} ₽" if len(methods()) > 1 else "")
+    await edit_or_send(call, f"📱 <b>Ещё устройства</b>\n\nСейчас: до {DEVICES} устройств.\n"
+                             f"Докупи <b>+{ADDON_DEVICES}</b> — будет до {DEVICES + ADDON_DEVICES} до конца текущей подписки "
+                             f"({fmt_date(u['expires_at'])}).\n\nЦена: <b>{price}</b>",
+                       back_kb([InlineKeyboardButton(text=f"Купить +{ADDON_DEVICES} — {price}", callback_data="plan:dev")]), "pay")
+
+
+@main_r.callback_query(F.data == "subreset")
+async def cb_subreset(call: CallbackQuery):
+    u, _ = ensure_user(call.from_user)
+    sub_token(u["id"], reset=True)
+    await call.answer("Ссылка-подписка обновлена, старая больше не работает", show_alert=True)
+    await cb_key(call)
+
+
+# ---------- коины и достижения ----------
+def coins_text(u) -> str:
+    got = db.ach_list(u["id"])
+    lines = [f"🏆 <b>Награды и Klux-коины</b>\n\n🪙 Баланс: <b>{u['coins'] or 0}</b> коинов\n"
+             f"💱 Курс: {COINS_PER_DAY} 🪙 = 1 день подписки\n\n<b>Достижения</b> ({len(got)}/{len(ACHIEVEMENTS)}):"]
+    for c, (e, t, d, k) in ACHIEVEMENTS.items():
+        lines.append(f"{'✅' if c in got else '▫️'} {e} <b>{t}</b> — {d} · +{k} 🪙")
+    lines.append(f"\nКоины также дают за спин колеса (+{WHEEL_COINS}) и за игры в «Бонусах».")
+    return "\n".join(lines)
+
+
+@main_r.callback_query(F.data == "coins")
+async def cb_coins(call: CallbackQuery):
+    u, _ = ensure_user(call.from_user)
+    rows = []
+    can = (u["coins"] or 0) // COINS_PER_DAY
+    if can >= 1:
+        btns = [InlineKeyboardButton(text=f"+{d} дн. за {d * COINS_PER_DAY} 🪙", callback_data=f"xch:{d}") for d in (1, 3, 7) if d <= can]
+        rows.append(btns)
+    if webapp_url():
+        rows.append([InlineKeyboardButton(text="🎮 Играть в «Бонусах»", web_app=WebAppInfo(url=webapp_url() + "#game"))])
+    await edit_or_send(call, coins_text(u), back_kb(*rows), "ref")
+    await call.answer()
+
+
+@main_r.callback_query(F.data.startswith("xch:"))
+async def cb_exchange(call: CallbackQuery):
+    ok, msg = await exchange_coins(call.from_user.id, int(call.data.split(":")[1]))
+    await call.answer(msg, show_alert=True)
+    if ok:
+        await cb_coins(call)
+
+
+# ---------- партнёрка ----------
+def partner_text(u) -> str:
+    st = db.partner_stats(u["id"])
+    return (
+        "💼 <b>Партнёрская программа</b>\n\n"
+        f"Ты получаешь <b>{u['partner_pct']}%</b> с каждой оплаты людей, пришедших по твоей ссылке.\n\n"
+        f"Ссылка:\n<code>{ref_link(u['id'])}</code>\n\n"
+        f"👥 Пришло: <b>{db.count_invited(u['id'])}</b> · платящих: <b>{st['buyers']}</b>\n"
+        f"💰 Заработано всего: <b>{st['earned']} ₽</b> · выплачено: <b>{st['paid_out']} ₽</b>\n"
+        f"💳 Баланс к выводу: <b>{u['partner_balance'] or 0} ₽</b> (минимум {PAYOUT_MIN} ₽)"
+    )
+
+
+@main_r.message(Command("partner"))
+async def cmd_partner(message: Message, command: CommandObject):
+    if message.from_user.id in ADMIN_IDS and command.args:
+        return await admin_partner_cmd(message, command.args)
+    await cb_ref(MsgCall(message))
+
+
+@main_r.callback_query(F.data == "payout")
+async def cb_payout(call: CallbackQuery, state: FSMContext):
+    u, _ = ensure_user(call.from_user)
+    if not u["partner_pct"]:
+        return await call.answer("Ты пока не партнёр", show_alert=True)
+    if (u["partner_balance"] or 0) < PAYOUT_MIN:
+        return await call.answer(f"Минимальная сумма вывода — {PAYOUT_MIN} ₽", show_alert=True)
+    await state.set_state(UserSG.payout)
+    await call.answer()
+    await call.message.answer(
+        f"💸 Вывод <b>{u['partner_balance']} ₽</b>\n\nНапиши одним сообщением, куда перевести: "
+        "номер телефона для СБП и банк, номер карты или адрес USDT (TRC20).",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✖️ Отмена", callback_data="cancel_state")]]))
+
+
+@main_r.message(UserSG.payout, F.text)
+async def payout_input(message: Message, state: FSMContext):
+    await state.clear()
+    if message.text.startswith("/"):
+        return
+    u = db.get_user(message.from_user.id)
+    amount = u["partner_balance"] or 0
+    if amount < PAYOUT_MIN:
+        return await message.answer(f"Минимальная сумма вывода — {PAYOUT_MIN} ₽")
+    pid = db.payout_create(u["id"], amount, message.text[:300])
+    if not pid:
+        return await message.answer("Не получилось создать заявку, попробуй ещё раз")
+    await message.answer(f"✅ Заявка на вывод <b>{amount} ₽</b> создана (№{pid}). Обычно выплачиваем в течение 1–3 дней.",
+                         parse_mode="HTML")
+    for aid in ADMIN_IDS:
+        try:
+            await main_bot.send_message(
+                aid, f"💸 <b>Заявка на вывод №{pid}</b>: {amount} ₽\nОт: {esc(u['name'] or '')} <code>{u['id']}</code>\n"
+                     f"Реквизиты: <code>{esc(message.text[:300])}</code>", parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Выплачено", callback_data=f"adm:po:paid:{pid}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm:po:rejected:{pid}")]]))
+        except Exception:
+            pass
+
+
+# ---------- тикеты поддержки ----------
+@main_r.callback_query(F.data.startswith("ticket"))
+async def cb_ticket(call: CallbackQuery, state: FSMContext):
+    await state.set_state(UserSG.ticket)
+    await call.answer()
+    await call.message.answer("✉️ Опиши проблему одним сообщением (можно с фото) — оно сразу придёт в поддержку.",
+                              reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                  InlineKeyboardButton(text="✖️ Отмена", callback_data="cancel_state")]]))
+
+
+@main_r.message(UserSG.ticket)
+async def ticket_input(message: Message, state: FSMContext):
+    text = message.text or message.caption or ""
+    if text.startswith("/"):
+        return await state.clear()
+    await state.clear()
+    u, _ = ensure_user(message.from_user)
+    t = db.ticket_open_for(u["id"])
+    tid = t["id"] if t else db.ticket_create(u["id"])
+    db.ticket_msg(tid, False, (text or "[фото]")[:2000])
+    await message.answer(f"✅ Сообщение отправлено в поддержку (обращение №{tid}). Ответ придёт сюда.")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="↩️ Ответить", callback_data=f"adm:tr:{tid}"),
+        InlineKeyboardButton(text="✅ Закрыть", callback_data=f"adm:tc:{tid}")]])
+    head = (f"📨 <b>Обращение №{tid}</b> от {esc(u['name'] or '')}" + (f" @{esc(u['username'])}" if u["username"] else "")
+            + f" <code>{u['id']}</code>\n" + ("🟠 подписка активна" if is_active(u) else "⚫️ без подписки") + "\n\n")
+    for aid in ADMIN_IDS:
+        try:
+            if message.photo:
+                await main_bot.send_photo(aid, message.photo[-1].file_id, caption=head + esc(text)[:900],
+                                          parse_mode="HTML", reply_markup=kb)
+            else:
+                await main_bot.send_message(aid, head + esc(text), parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
+
+
+
+# ======================= v2: админка — промокоды, партнёры, выплаты, тикеты, доходы, бэкап =======================
+PROMO_HELP = (
+    "🎟 <b>Промокоды</b>\n\n"
+    "<code>/promo add КОД 20%</code> — скидка 20% на оплату\n"
+    "<code>/promo add КОД 7d</code> — +7 дней подписки\n"
+    "Доп. параметры (по порядку): лимит активаций, срок жизни в днях, ID партнёра\n"
+    "<code>/promo add BLOGER 15% 100 30 123456</code> — 100 активаций, 30 дней, приведённые идут партнёру 123456\n"
+    "<code>/promo off КОД</code> / <code>/promo on КОД</code> — выключить / включить\n"
+    "<code>/promo list</code> — список и статистика\n\n"
+    "Ссылка с промокодом: <code>https://t.me/{bot}?start=promo_КОД</code>"
+)
+
+
+def promo_list_text() -> str:
+    rows = db.promo_list()
+    if not rows:
+        return "Промокодов пока нет.\n\n" + PROMO_HELP.format(bot=MAIN_USERNAME)
+    lines = ["🎟 <b>Промокоды</b> (код · бонус · активаций · доход)\n"]
+    for p in rows:
+        bonus = f"−{p['value']}%" if p["kind"] == "pct" else f"+{p['value']} дн."
+        lim = f"{p['used']}/{p['max_uses']}" if p["max_uses"] else f"{p['used']}"
+        exp = " · истёк" if p["expires_at"] and p["expires_at"] < time.time() else ""
+        off = " · ⛔️выкл" if not p["active"] else ""
+        partner = f" · партнёр {p['partner_id']}" if p["partner_id"] else ""
+        lines.append(f"<code>{esc(p['code'])}</code> · {bonus} · {lim} · {p['revenue']} ₽{exp}{off}{partner}")
+    return "\n".join(lines)
+
+
+async def admin_promo_cmd(message: Message, args: str):
+    if not admin_authed(message.from_user.id):
+        return await message.answer("Сначала войди в админку: /admin")
+    parts = args.split()
+    cmd = parts[0].lower()
+    if cmd == "list":
+        return await message.answer(promo_list_text(), parse_mode="HTML")
+    if cmd in ("off", "on") and len(parts) >= 2:
+        if not db.promo_get(parts[1]):
+            return await message.answer("Нет такого кода")
+        db.promo_set_active(parts[1], cmd == "on")
+        return await message.answer(f"Промокод {parts[1].upper()} {'включён' if cmd == 'on' else 'выключен'}")
+    if cmd == "add" and len(parts) >= 3:
+        code, val = parts[1].upper(), parts[2].lower()
+        if not code.replace("-", "").replace("_", "").isalnum() or len(code) > 32:
+            return await message.answer("Код — только буквы, цифры, - и _ (до 32 символов)")
+        if val.endswith("%") and val[:-1].isdigit() and 1 <= int(val[:-1]) <= 90:
+            kind, value = "pct", int(val[:-1])
+        elif val.endswith("d") and val[:-1].isdigit() and 1 <= int(val[:-1]) <= 365:
+            kind, value = "days", int(val[:-1])
+        else:
+            return await message.answer("Бонус: 1–90% или 1–365d (например 20% или 7d)")
+        uses = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        life = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0
+        partner = int(parts[5]) if len(parts) > 5 and parts[5].isdigit() else None
+        if partner and not db.get_user(partner):
+            return await message.answer("Партнёр с таким ID не найден в боте")
+        if not db.promo_create(code, kind, value, uses, int(time.time()) + life * 86400 if life else 0, partner):
+            return await message.answer("Такой код уже есть")
+        link = f"https://t.me/{MAIN_USERNAME}?start=promo_{code}"
+        return await message.answer(
+            f"✅ Промокод <code>{code}</code> создан: {'−' + str(value) + '%' if kind == 'pct' else '+' + str(value) + ' дн.'}"
+            + (f", лимит {uses}" if uses else "") + (f", {life} дн." if life else "") + (f", партнёр {partner}" if partner else "")
+            + f"\nСсылка: <code>{link}</code>", parse_mode="HTML")
+    await message.answer(PROMO_HELP.format(bot=MAIN_USERNAME), parse_mode="HTML")
+
+
+async def admin_partner_cmd(message: Message, args: str):
+    if not admin_authed(message.from_user.id):
+        return await message.answer("Сначала войди в админку: /admin")
+    parts = args.split()
+    if parts[0].lower() == "list":
+        rows = db.partners_list()
+        if not rows:
+            return await message.answer("Партнёров пока нет. Добавить: /partner ID 20")
+        lines = ["💼 <b>Партнёры</b>\n"]
+        for u in rows:
+            st = db.partner_stats(u["id"])
+            lines.append(f"<code>{u['id']}</code> {esc(u['name'] or '')} · {u['partner_pct']}% · привёл {db.count_invited(u['id'])} · "
+                         f"заработал {st['earned']} ₽ · баланс {u['partner_balance']} ₽")
+        return await message.answer("\n".join(lines), parse_mode="HTML")
+    if not parts[0].isdigit() or not db.get_user(int(parts[0])):
+        return await message.answer("Использование: /partner ID [процент] — 0 выключает. /partner list — список")
+    uid = int(parts[0])
+    pct = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else PARTNER_PCT
+    pct = max(0, min(pct, 60))
+    db.set_field(uid, "partner_pct", pct)
+    await message.answer(f"✅ Партнёрка для <code>{uid}</code>: {pct}%" if pct else f"Партнёрка для {uid} выключена",
+                         parse_mode="HTML")
+    if pct:
+        try:
+            await main_bot.send_message(uid, f"💼 Тебя подключили к партнёрской программе KluxVPN!\n"
+                                             f"Теперь ты получаешь {pct}% с каждой оплаты людей по твоей ссылке. "
+                                             f"Подробности — в «🤝 Пригласить друга».")
+        except Exception:
+            pass
+
+
+@admin_r.callback_query(F.data.startswith("adm:po:"))
+async def adm_payout(call: CallbackQuery):
+    _, _, status, pid = call.data.split(":")
+    p = db.payout_set(int(pid), status)
+    if not p:
+        return await call.answer("Заявка уже обработана", show_alert=True)
+    await call.answer("Готово")
+    mark = "✅ ВЫПЛАЧЕНО" if status == "paid" else "❌ ОТКЛОНЕНО (деньги вернулись на баланс)"
+    try:
+        await call.message.edit_text((call.message.html_text or call.message.text or "") + f"\n\n<b>{mark}</b>", parse_mode="HTML")
+    except Exception:
+        pass
+    try:
+        await main_bot.send_message(p["user_id"], f"💸 Заявка на вывод №{pid} на {p['amount']} ₽: "
+                                                  + ("выплачено ✅" if status == "paid" else "отклонена, сумма вернулась на баланс. Напиши в поддержку."))
+    except Exception:
+        pass
+
+
+@admin_r.callback_query(F.data == "adm:promos")
+async def adm_promos(call: CallbackQuery):
+    await call.answer()
+    await call.message.answer(promo_list_text() + "\n\n" + PROMO_HELP.format(bot=MAIN_USERNAME), parse_mode="HTML",
+                              disable_web_page_preview=True)
+
+
+@admin_r.callback_query(F.data == "adm:partners")
+async def adm_partners(call: CallbackQuery):
+    await call.answer()
+    po = db.payouts_open()
+    if po:
+        for p in po:
+            u = db.get_user(p["user_id"])
+            await call.message.answer(
+                f"💸 <b>Заявка №{p['id']}</b>: {p['amount']} ₽ от {esc(u['name'] if u else '')} <code>{p['user_id']}</code>\n"
+                f"Реквизиты: <code>{esc(p['details'])}</code>", parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Выплачено", callback_data=f"adm:po:paid:{p['id']}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm:po:rejected:{p['id']}")]]))
+    msg = SimpleNamespace(from_user=call.from_user, answer=call.message.answer)
+    await admin_partner_cmd(msg, "list")
+
+
+# ---------- тикеты ----------
+@admin_r.callback_query(F.data == "adm:tickets")
+async def adm_tickets(call: CallbackQuery):
+    await call.answer()
+    rows = db.tickets_list("open")
+    if not rows:
+        return await call.message.answer("📨 Открытых обращений нет 🎉")
+    for t in rows:
+        await call.message.answer(
+            f"📨 <b>№{t['id']}</b> · {esc(t['name'] or '')}" + (f" @{esc(t['username'])}" if t["username"] else "")
+            + f" <code>{t['user_id']}</code> · {fmt_date(t['updated_at'])}\n{esc((t['last'] or '')[:300])}",
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="📜 История", callback_data=f"adm:th:{t['id']}"),
+                InlineKeyboardButton(text="↩️ Ответить", callback_data=f"adm:tr:{t['id']}"),
+                InlineKeyboardButton(text="✅ Закрыть", callback_data=f"adm:tc:{t['id']}")]]))
+
+
+@admin_r.callback_query(F.data.startswith("adm:th:"))
+async def adm_ticket_history(call: CallbackQuery):
+    tid = int(call.data.split(":")[2])
+    msgs = db.ticket_msgs(tid)
+    await call.answer()
+    text = "\n\n".join(f"{'🛠 Ты' if m['from_admin'] else '👤 Клиент'} · {fmt_date(m['at'])}\n{esc(m['text'])}" for m in msgs)
+    await call.message.answer(f"📜 <b>Обращение №{tid}</b>\n\n{text or 'пусто'}"[:4000], parse_mode="HTML")
+
+
+@admin_r.callback_query(F.data.startswith("adm:tr:"))
+async def adm_ticket_reply(call: CallbackQuery, state: FSMContext):
+    tid = int(call.data.split(":")[2])
+    await state.set_state(AdminSG2.ticket_reply)
+    await state.update_data(tid=tid)
+    await call.answer()
+    await call.message.answer(f"✍️ Напиши ответ на обращение №{tid} (или /cancel):")
+
+
+@admin_r.message(AdminSG2.ticket_reply)
+async def adm_ticket_reply_send(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    t = db.ticket_get(int(data.get("tid", 0)))
+    if not t or not message.text:
+        return await message.answer("Обращение не найдено или пустой ответ")
+    db.ticket_msg(t["id"], True, message.text[:2000])
+    try:
+        await main_bot.send_message(
+            t["user_id"], f"💬 <b>Ответ поддержки</b> (обращение №{t['id']}):\n\n{esc(message.text)}", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Ответить", callback_data="ticket")]]))
+        await message.answer("✅ Ответ отправлен", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Закрыть обращение", callback_data=f"adm:tc:{t['id']}")]]))
+    except Exception as e:
+        await message.answer(f"Не удалось отправить: {e}")
+
+
+@admin_r.callback_query(F.data.startswith("adm:tc:"))
+async def adm_ticket_close(call: CallbackQuery):
+    tid = int(call.data.split(":")[2])
+    t = db.ticket_get(tid)
+    db.ticket_close(tid)
+    await call.answer(f"Обращение №{tid} закрыто")
+    if t:
+        try:
+            await main_bot.send_message(t["user_id"], f"✅ Обращение №{tid} закрыто. Если вопрос остался — нажми «💬 Поддержка».")
+        except Exception:
+            pass
+
+
+# ---------- доходы ----------
+def revenue_text(days: int = 14) -> str:
+    data = {d: (rub, st) for d, rub, st in db.revenue_by_day(days)}
+    today = datetime.now(MSK).date()
+    rows, total_rub, total_st = [], 0, 0
+    for i in range(days - 1, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        rub, st = data.get(d, (0, 0))
+        rows.append((d, rub, st, rub + round(st * STAR_RUB)))
+        total_rub += rub
+        total_st += st
+    mx = max((r[3] for r in rows), default=0) or 1
+    lines = [f"📈 <b>Доходы за {days} дн.</b> (≈ в рублях, ⭐ по {STAR_RUB} ₽)\n<code>"]
+    for d, rub, st, tot in rows:
+        bar = "█" * round(tot / mx * 14) if tot else "·"
+        lines.append(f"{d[8:10]}.{d[5:7]} {bar:<14} {tot:>6}")
+    lines.append("</code>")
+    lines.append(f"\n₽ Рублями: <b>{total_rub} ₽</b> · ⭐ Звёздами: <b>{total_st} ⭐</b> (≈{round(total_st * STAR_RUB)} ₽)")
+    lines.append(f"Итого ≈ <b>{total_rub + round(total_st * STAR_RUB)} ₽</b> · в среднем {round((total_rub + total_st * STAR_RUB) / days)} ₽/день")
+    promos = [p for p in db.promo_list(50) if p["revenue"]]
+    if promos:
+        lines.append("\n🎟 <b>Доход по промокодам:</b>")
+        for p in sorted(promos, key=lambda x: -x["revenue"])[:8]:
+            lines.append(f"<code>{esc(p['code'])}</code> — {p['revenue']} ₽ ({p['used']} акт.)")
+    return "\n".join(lines)
+
+
+@admin_r.callback_query(F.data.startswith("adm:rev"))
+async def adm_revenue(call: CallbackQuery):
+    days = 30 if call.data == "adm:rev30" else 14
+    await call.answer()
+    await call.message.answer(revenue_text(days), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="14 дней", callback_data="adm:rev"), InlineKeyboardButton(text="30 дней", callback_data="adm:rev30")]]))
+
+
+# ---------- бэкап ----------
+async def send_backup(chat_id: int | None = None):
+    path = f"/tmp/klyx_backup_{int(time.time())}.db"
+    try:
+        db.backup_to(path)
+        name = f"klyx_{datetime.now(MSK).strftime('%Y-%m-%d_%H-%M')}.db"
+        st = db.stats()
+        for aid in ([chat_id] if chat_id else [ADMIN_ID]):
+            await main_bot.send_document(aid, FSInputFile(path, filename=name),
+                                         caption=f"📦 Бэкап базы KluxVPN · пользователей: {st['users']}\n"
+                                                 "Храни этот файл в надёжном месте и никому не пересылай.")
+    except Exception as e:
+        log.error("Бэкап: %s", e)
+        await notify_admin(f"⚠️ Не удалось сделать бэкап: {esc(e)}")
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+async def backup_loop():
+    while True:
+        now = datetime.now(MSK)
+        nxt = now.replace(hour=BACKUP_HOUR % 24, minute=0, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        await asyncio.sleep((nxt - now).total_seconds())
+        if db.get_setting("backup_on", "1") == "1":
+            await send_backup()
+
+
+@admin_r.callback_query(F.data == "adm:backup")
+async def adm_backup(call: CallbackQuery):
+    await call.answer("Готовлю бэкап…")
+    await send_backup(call.from_user.id)
 
 
 # ---------------- API для мини-апки ----------------
@@ -1951,12 +2826,24 @@ async def me_payload(u) -> dict:
         "expires_text": fmt_date(u["expires_at"]) if active else "",
         "days_left": days_left(u),
         "key": await key_for(u) if active else None,
+        "keys": [{"name": n, "key": k} for n, k in await keys_for(u)] if active else [],
+        "sub_url": sub_url(u),
+        "device_limit": device_limit(u),
+        "addon": {"devices": ADDON_DEVICES, "rub": ADDON_RUB, "stars": ADDON_STARS,
+                  "active": bool((u["extra_devices"] or 0) and (u["extra_until"] or 0) > time.time()),
+                  "until": fmt_date(u["extra_until"]) if u["extra_until"] else ""},
+        "promo": {"code": u["promo_code"], "pct": u["promo_pct"] or 0},
+        "partner": ({"pct": u["partner_pct"], "balance": u["partner_balance"] or 0, "min": PAYOUT_MIN,
+                     **db.partner_stats(u["id"])} if u["partner_pct"] else None),
+        "coins": coins_payload(u),
+        "mini": mini_info(u),
         "trial_available": bool(TRIAL_DAYS and not u["trial_used"] and not active),
         "trial_days": TRIAL_DAYS,
         "devices": DEVICES,
-        "plans": [{"key": k, "name": n, "stars": s, "rub": RUB_PRICES[k], "days": d} for k, (n, s, d) in PLANS.items()],
+        "plans": [{"key": k, "name": n, "stars": s, "rub": RUB_PRICES[k], "days": d,
+                   "stars_now": price_for(k, u["id"])[0], "rub_now": price_for(k, u["id"])[1]} for k, (n, s, d) in PLANS.items()],
         "methods": methods(),
-        "servers": [{"name": SERVER_NAME, "protocol": "VLESS Reality"}],
+        "servers": servers_payload(),
         "ref_link": ref_link(u["id"]),
         "ref_bonus": REF_BONUS_DAYS,
         "invited": db.count_invited(u["id"]),
@@ -1977,9 +2864,12 @@ async def api_invoice(request):
     u = api_user(request)
     body = await request.json()
     plan, method = body.get("plan"), body.get("method", "stars")
-    if plan not in PLANS or method not in methods():
+    if not product(str(plan)) or method not in methods():
         return web.json_response({"error": "unknown plan or method"}, status=400)
-    link, inv_id = await create_payment(method, plan, u["id"])
+    try:
+        link, inv_id = await create_payment(method, plan, u["id"])
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"link": link, "method": method, "invoice": inv_id})
 
 
@@ -2110,6 +3000,12 @@ async def api_game_finish(request):
     db.game_add_minutes(u["id"], game_today(), minutes, score)
     if minutes:
         await add_seconds(u["id"], minutes * 60)
+    if score >= 5:
+        db.coins_add(u["id"], score // 5, "hack")
+    if score >= 30:
+        await award(u["id"], "hacker")
+    if score >= 60:
+        await award(u["id"], "elite")
     u = db.get_user(u["id"])
     return web.json_response({"score": score, "minutes": minutes, "game": game_info(u), "me": await me_payload(u),
                               "rank": db.game_rank(u["id"], game_today())})
@@ -2174,6 +3070,13 @@ async def api_wheel_spin(request):
     cyc = (streak - 1) % 7 + 1
     bonus = STREAK_BONUS.get(cyc, 0)
     await add_seconds(u["id"], (prize + bonus) * 60)
+    db.coins_add(u["id"], WHEEL_COINS, "wheel")
+    if streak >= 7:
+        await award(u["id"], "streak7")
+    if streak >= 30:
+        await award(u["id"], "streak30")
+    if prize >= 120:
+        await award(u["id"], "lucky")
     if prize >= 120 or bonus >= 24 * 60:
         await notify_admin(f"🎡 <code>{u['id']}</code> выиграл в колесе {prize} мин" + (f" + бонус серии {bonus} мин" if bonus else ""))
     u = db.get_user(u["id"])
@@ -2186,6 +3089,125 @@ async def api_game_top(request):
     return web.json_response(game_top_payload(u["id"]))
 
 
+
+# ---------------- v2 API: промокоды, коины, устройства, партнёрка, «Башня данных» ----------------
+STACK_ROUNDS = int(env("STACK_ROUNDS", "3"))
+STACK_ROUND_MIN = int(env("STACK_ROUND_MIN", "30"))
+_mini_sessions: dict[str, tuple[int, float, str]] = {}
+
+
+def mini_info(u) -> dict:
+    d = db.mini_day(u["id"], "stack", game_today())
+    g = db.game_day(u["id"], game_today())
+    return {"allowed": GAME_ON and (GAME_FOR_ALL or is_active(u)), "rounds": STACK_ROUNDS,
+            "rounds_left": max(0, STACK_ROUNDS - d["rounds"]), "best": d["best"], "round_cap": STACK_ROUND_MIN,
+            "minutes_today": g["minutes"], "daily_cap": GAME_DAILY_MIN}
+
+
+async def api_promo(request):
+    u = api_user(request)
+    body = await request.json()
+    ok, msg = await apply_promo(u["id"], str(body.get("code", ""))[:40])
+    u = db.get_user(u["id"])
+    return web.json_response({"ok": ok, "message": html.unescape(msg.replace("<b>", "").replace("</b>", "")),
+                              "me": await me_payload(u)}, status=200 if ok else 400)
+
+
+async def api_coins_exchange(request):
+    u = api_user(request)
+    body = await request.json()
+    try:
+        days = int(body.get("days", 1))
+    except (TypeError, ValueError):
+        days = 0
+    ok, msg = await exchange_coins(u["id"], max(0, min(days, 30)))
+    return web.json_response({"ok": ok, "message": msg, "me": await me_payload(db.get_user(u["id"]))},
+                             status=200 if ok else 400)
+
+
+async def api_sub_reset(request):
+    u = api_user(request)
+    sub_token(u["id"], reset=True)
+    return web.json_response({"me": await me_payload(db.get_user(u["id"]))})
+
+
+async def api_mini_start(request):
+    u = api_user(request)
+    m = mini_info(u)
+    if not m["allowed"]:
+        return web.json_response({"error": "Игра доступна с активной подпиской"}, status=403)
+    if m["rounds_left"] <= 0 or m["minutes_today"] >= GAME_DAILY_MIN:
+        return web.json_response({"error": "На сегодня всё — приходи завтра 🧡"}, status=429)
+    for t, (uid, ts, _) in list(_mini_sessions.items()):
+        if uid == u["id"] or time.time() - ts > 900:
+            _mini_sessions.pop(t, None)
+    db.mini_start(u["id"], "stack", game_today())
+    token = secrets.token_urlsafe(16)
+    _mini_sessions[token] = (u["id"], time.time(), "stack")
+    return web.json_response({"token": token, "mini": mini_info(db.get_user(u["id"]))})
+
+
+async def api_mini_finish(request):
+    u = api_user(request)
+    body = await request.json()
+    sess = _mini_sessions.pop(str(body.get("token", "")), None)
+    if not sess or sess[0] != u["id"]:
+        return web.json_response({"error": "Раунд не найден, начни заново"}, status=400)
+    elapsed = time.time() - sess[1]
+    try:
+        score = int(body.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0
+    # блок физически нельзя поставить быстрее ~0,35 с
+    if elapsed < 1 or elapsed > 900 or score < 0 or score > 200 or score > elapsed * 3 + 2:
+        log.warning("Башня: подозрительный результат %s: %s за %.1fс", u["id"], score, elapsed)
+        score = 0
+    g = db.game_day(u["id"], game_today())
+    if g["rounds"] == 0:
+        db.game_start_round(u["id"], game_today())  # чтобы строка дня существовала для учёта минут
+        db.game_undo_round(u["id"], game_today())
+    minutes = max(0, min(score, STACK_ROUND_MIN, GAME_DAILY_MIN - g["minutes"]))
+    db.game_add_minutes(u["id"], game_today(), minutes, 0)
+    db.mini_best(u["id"], "stack", game_today(), score)
+    if minutes:
+        await add_seconds(u["id"], minutes * 60)
+    if score >= 5:
+        db.coins_add(u["id"], score // 5, "stack")
+    if score >= 15:
+        await award(u["id"], "builder")
+    if score >= 30:
+        await award(u["id"], "architect")
+    u = db.get_user(u["id"])
+    return web.json_response({"score": score, "minutes": minutes, "me": await me_payload(u)})
+
+
+async def api_payout(request):
+    u = api_user(request)
+    if not u["partner_pct"]:
+        return web.json_response({"error": "Ты не партнёр"}, status=403)
+    body = await request.json()
+    details = str(body.get("details", "")).strip()[:300]
+    amount = u["partner_balance"] or 0
+    if amount < PAYOUT_MIN:
+        return web.json_response({"error": f"Минимальная сумма вывода — {PAYOUT_MIN} ₽"}, status=400)
+    if len(details) < 5:
+        return web.json_response({"error": "Укажи реквизиты"}, status=400)
+    pid = db.payout_create(u["id"], amount, details)
+    if not pid:
+        return web.json_response({"error": "Не получилось создать заявку"}, status=400)
+    for aid in ADMIN_IDS:
+        try:
+            await main_bot.send_message(
+                aid, f"💸 <b>Заявка на вывод №{pid}</b>: {amount} ₽\nОт: {esc(u['name'] or '')} <code>{u['id']}</code>\n"
+                     f"Реквизиты: <code>{esc(details)}</code>", parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Выплачено", callback_data=f"adm:po:paid:{pid}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm:po:rejected:{pid}")]]))
+        except Exception:
+            pass
+    return web.json_response({"ok": True, "id": pid, "me": await me_payload(db.get_user(u["id"]))})
+
+
 async def api_public(request):
     """Публичные данные для страниц документов: контакты поддержки, тарифы, кодовое слово."""
     return web.json_response({
@@ -2195,15 +3217,44 @@ async def api_public(request):
     })
 
 
+async def api_sub(request):
+    """Ссылка-подписка для Hiddify / v2RayTun / Streisand: все ключи пользователя в base64."""
+    u = db.user_by_token(request.match_info.get("token", ""))
+    if not u:
+        return web.Response(status=404, text="not found")
+    links = [k for _, k in await keys_for(u)] if is_active(u) else []
+    body = base64.b64encode("\n".join(links).encode()).decode()
+    title = base64.b64encode("KluxVPN".encode()).decode()
+    return web.Response(text=body, content_type="text/plain", headers={
+        "profile-title": f"base64:{title}",
+        "profile-update-interval": "12",
+        "subscription-userinfo": f"upload=0; download=0; total=0; expire={u['expires_at'] or 0}",
+        "support-url": f"https://t.me/{MAIN_USERNAME}" if MAIN_USERNAME else "",
+        "profile-web-page-url": f"https://t.me/{MAIN_USERNAME}" if MAIN_USERNAME else "",
+    })
+
+
 async def api_root(request):
     return web.Response(text="KluxVPN API ok")
 
 
 async def start_api():
+    runner = web.AppRunner(make_app())
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    log.info("🌐 API запущен на порту %s (публичный адрес: %s)", PORT, PUBLIC_URL or "не задан")
+
+
+def make_app() -> web.Application:
     app = web.Application(middlewares=[cors])
     app.router.add_get("/", api_root)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/public", api_public)
+    app.router.add_get("/sub/{token}", api_sub)
+    app.router.add_post("/api/promo", api_promo)
+    app.router.add_post("/api/coins/exchange", api_coins_exchange)
+    app.router.add_post("/api/sub/reset", api_sub_reset)
+    app.router.add_post("/api/payout", api_payout)
     app.router.add_post("/api/invoice", api_invoice)
     app.router.add_post("/api/trial", api_trial)
     app.router.add_post("/api/game/start", api_game_start)
@@ -2213,10 +3264,7 @@ async def start_api():
     app.router.add_post("/yoomoney", api_yoomoney)
     app.router.add_post("/platega", api_platega)
     app.router.add_route("OPTIONS", "/{tail:.*}", api_root)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    log.info("🌐 API запущен на порту %s (публичный адрес: %s)", PORT, PUBLIC_URL or "не задан")
+    return app
 
 
 # ---------------- запуск ----------------
@@ -2266,6 +3314,8 @@ async def main():
     asyncio.create_task(reminders_loop())
     asyncio.create_task(crypto_loop())
     asyncio.create_task(platega_loop())
+    asyncio.create_task(servers_status_loop())
+    asyncio.create_task(backup_loop())
     asyncio.create_task(clear_ips_loop())
     await dp.start_polling(*bots)
 

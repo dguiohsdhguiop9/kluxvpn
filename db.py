@@ -363,3 +363,300 @@ def game_rank(uid: int, day: str):
 def wheel_stats(day: str) -> dict:
     r = _conn.execute("SELECT COUNT(*), COALESCE(SUM(prize),0) FROM wheel_spins WHERE day=?", (day,)).fetchone()
     return {"spins": r[0], "minutes": r[1]}
+
+
+# ================= v2: промокоды, подарки, партнёрка, коины, тикеты =================
+for col, typ in (("sub_token", "TEXT"), ("promo_code", "TEXT"), ("promo_pct", "INTEGER DEFAULT 0"),
+                 ("extra_devices", "INTEGER DEFAULT 0"), ("extra_until", "INTEGER DEFAULT 0"),
+                 ("partner_pct", "INTEGER DEFAULT 0"), ("partner_balance", "INTEGER DEFAULT 0"),
+                 ("coins", "INTEGER DEFAULT 0")):
+    try:
+        _conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
+        _conn.commit()
+    except sqlite3.OperationalError:
+        pass
+try:
+    _conn.execute("ALTER TABLE invoices ADD COLUMN promo TEXT")
+    _conn.commit()
+except sqlite3.OperationalError:
+    pass
+
+_conn.executescript(
+    """
+    CREATE TABLE IF NOT EXISTS promos (
+        code TEXT PRIMARY KEY, kind TEXT, value INTEGER, max_uses INTEGER DEFAULT 0, used INTEGER DEFAULT 0,
+        expires_at INTEGER DEFAULT 0, partner_id INTEGER, note TEXT, active INTEGER DEFAULT 1, created_at INTEGER);
+    CREATE TABLE IF NOT EXISTS promo_uses (
+        code TEXT, user_id INTEGER, at INTEGER, revenue INTEGER DEFAULT 0, PRIMARY KEY (code, user_id));
+    CREATE TABLE IF NOT EXISTS achievements (
+        user_id INTEGER, code TEXT, at INTEGER, PRIMARY KEY (user_id, code));
+    CREATE TABLE IF NOT EXISTS coin_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, delta INTEGER, reason TEXT, at INTEGER);
+    CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, status TEXT DEFAULT 'open', created_at INTEGER, updated_at INTEGER);
+    CREATE TABLE IF NOT EXISTS ticket_msgs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, from_admin INTEGER, text TEXT, at INTEGER);
+    CREATE TABLE IF NOT EXISTS partner_earn (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, partner_id INTEGER, from_user INTEGER, amount INTEGER, charge_id TEXT, at INTEGER);
+    CREATE TABLE IF NOT EXISTS payouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, details TEXT, status TEXT DEFAULT 'new', created_at INTEGER);
+    CREATE TABLE IF NOT EXISTS mini_games (
+        user_id INTEGER, game TEXT, day TEXT, rounds INTEGER DEFAULT 0, best INTEGER DEFAULT 0, PRIMARY KEY (user_id, game, day));
+    """
+)
+_conn.commit()
+
+USER_FIELDS_V2 = {"sub_token", "promo_code", "promo_pct", "extra_devices", "extra_until", "partner_pct",
+                  "partner_balance", "coins"}
+
+
+def set_field(uid: int, field: str, value):
+    assert field in USER_FIELDS_V2
+    _conn.execute(f"UPDATE users SET {field}=? WHERE id=?", (value, uid))
+    _conn.commit()
+
+
+def user_by_token(token: str):
+    return _conn.execute("SELECT * FROM users WHERE sub_token=?", (token,)).fetchone()
+
+
+# ---- промокоды ----
+def promo_get(code: str):
+    return _conn.execute("SELECT * FROM promos WHERE code=?", (code.upper(),)).fetchone()
+
+
+def promo_create(code: str, kind: str, value: int, max_uses: int = 0, expires_at: int = 0,
+                 partner_id: int | None = None, note: str = "") -> bool:
+    try:
+        _conn.execute("INSERT INTO promos (code, kind, value, max_uses, expires_at, partner_id, note, created_at) "
+                      "VALUES (?,?,?,?,?,?,?,?)", (code.upper(), kind, value, max_uses, expires_at, partner_id, note, now()))
+        _conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def promo_used_by(code: str, uid: int) -> bool:
+    return bool(_conn.execute("SELECT 1 FROM promo_uses WHERE code=? AND user_id=?", (code.upper(), uid)).fetchone())
+
+
+def promo_use(code: str, uid: int) -> bool:
+    """Атомарно отмечает использование. False — если лимит исчерпан или уже использован."""
+    code = code.upper()
+    cur = _conn.execute("UPDATE promos SET used=used+1 WHERE code=? AND active=1 AND (max_uses=0 OR used<max_uses)", (code,))
+    if cur.rowcount == 0:
+        return False
+    try:
+        _conn.execute("INSERT INTO promo_uses (code, user_id, at) VALUES (?,?,?)", (code, uid, now()))
+    except sqlite3.IntegrityError:
+        _conn.execute("UPDATE promos SET used=used-1 WHERE code=?", (code,))
+        _conn.commit()
+        return False
+    _conn.commit()
+    return True
+
+
+def promo_add_revenue(code: str, uid: int, rub: int):
+    _conn.execute("UPDATE promo_uses SET revenue=revenue+? WHERE code=? AND user_id=?", (rub, code.upper(), uid))
+    _conn.commit()
+
+
+def promo_set_active(code: str, active: bool):
+    _conn.execute("UPDATE promos SET active=? WHERE code=?", (1 if active else 0, code.upper()))
+    _conn.commit()
+
+
+def promo_list(limit: int = 30):
+    return _conn.execute(
+        "SELECT p.*, COALESCE((SELECT SUM(revenue) FROM promo_uses u WHERE u.code=p.code),0) AS revenue "
+        "FROM promos p WHERE p.code NOT LIKE 'GIFT-%' ORDER BY p.created_at DESC LIMIT ?", (limit,)).fetchall()
+
+
+def invoice_set_promo(inv_id: str, code: str):
+    _conn.execute("UPDATE invoices SET promo=? WHERE id=?", (code, inv_id))
+    _conn.commit()
+
+
+# ---- коины и достижения ----
+def coins_add(uid: int, delta: int, reason: str) -> int:
+    _conn.execute("UPDATE users SET coins=MAX(0, coins+?) WHERE id=?", (delta, uid))
+    _conn.execute("INSERT INTO coin_log (user_id, delta, reason, at) VALUES (?,?,?,?)", (uid, delta, reason, now()))
+    _conn.commit()
+    r = _conn.execute("SELECT coins FROM users WHERE id=?", (uid,)).fetchone()
+    return r[0] if r else 0
+
+
+def coins_spend(uid: int, amount: int, reason: str) -> bool:
+    cur = _conn.execute("UPDATE users SET coins=coins-? WHERE id=? AND coins>=?", (amount, uid, amount))
+    if cur.rowcount == 0:
+        return False
+    _conn.execute("INSERT INTO coin_log (user_id, delta, reason, at) VALUES (?,?,?,?)", (uid, -amount, reason, now()))
+    _conn.commit()
+    return True
+
+
+def coin_history(uid: int, limit: int = 10):
+    return _conn.execute("SELECT delta, reason, at FROM coin_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                         (uid, limit)).fetchall()
+
+
+def ach_has(uid: int, code: str) -> bool:
+    return bool(_conn.execute("SELECT 1 FROM achievements WHERE user_id=? AND code=?", (uid, code)).fetchone())
+
+
+def ach_add(uid: int, code: str) -> bool:
+    try:
+        _conn.execute("INSERT INTO achievements (user_id, code, at) VALUES (?,?,?)", (uid, code, now()))
+        _conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def ach_list(uid: int) -> dict:
+    return {r[0]: r[1] for r in _conn.execute("SELECT code, at FROM achievements WHERE user_id=?", (uid,)).fetchall()}
+
+
+def game_best_ever(uid: int) -> int:
+    r = _conn.execute("SELECT MAX(best) FROM game_days WHERE user_id=?", (uid,)).fetchone()
+    return r[0] or 0
+
+
+def paid_invited(uid: int) -> int:
+    return _conn.execute("SELECT COUNT(*) FROM users WHERE referrer=? AND ref_paid=1", (uid,)).fetchone()[0]
+
+
+# ---- вторая мини-игра ----
+def mini_day(uid: int, game: str, day: str) -> dict:
+    r = _conn.execute("SELECT rounds, best FROM mini_games WHERE user_id=? AND game=? AND day=?", (uid, game, day)).fetchone()
+    return {"rounds": r[0], "best": r[1]} if r else {"rounds": 0, "best": 0}
+
+
+def mini_start(uid: int, game: str, day: str):
+    _conn.execute("INSERT INTO mini_games (user_id, game, day, rounds) VALUES (?,?,?,1) "
+                  "ON CONFLICT(user_id, game, day) DO UPDATE SET rounds=rounds+1", (uid, game, day))
+    _conn.commit()
+
+
+def mini_best(uid: int, game: str, day: str, score: int):
+    _conn.execute("UPDATE mini_games SET best=MAX(best, ?) WHERE user_id=? AND game=? AND day=?", (score, uid, game, day))
+    _conn.commit()
+
+
+# ---- партнёрка ----
+def partner_credit(partner_id: int, from_user: int, amount: int, charge_id: str):
+    _conn.execute("INSERT INTO partner_earn (partner_id, from_user, amount, charge_id, at) VALUES (?,?,?,?,?)",
+                  (partner_id, from_user, amount, charge_id, now()))
+    _conn.execute("UPDATE users SET partner_balance=partner_balance+? WHERE id=?", (amount, partner_id))
+    _conn.commit()
+
+
+def partner_stats(uid: int) -> dict:
+    r = _conn.execute("SELECT COALESCE(SUM(amount),0), COUNT(*), COUNT(DISTINCT from_user) FROM partner_earn WHERE partner_id=?",
+                      (uid,)).fetchone()
+    paid_out = _conn.execute("SELECT COALESCE(SUM(amount),0) FROM payouts WHERE user_id=? AND status='paid'", (uid,)).fetchone()[0]
+    return {"earned": r[0], "payments": r[1], "buyers": r[2], "paid_out": paid_out}
+
+
+def payout_create(uid: int, amount: int, details: str) -> int | None:
+    cur = _conn.execute("UPDATE users SET partner_balance=partner_balance-? WHERE id=? AND partner_balance>=?",
+                        (amount, uid, amount))
+    if cur.rowcount == 0:
+        return None
+    c = _conn.execute("INSERT INTO payouts (user_id, amount, details, created_at) VALUES (?,?,?,?)",
+                      (uid, amount, details, now()))
+    _conn.commit()
+    return c.lastrowid
+
+
+def payout_get(pid: int):
+    return _conn.execute("SELECT * FROM payouts WHERE id=?", (pid,)).fetchone()
+
+
+def payout_set(pid: int, status: str):
+    p = payout_get(pid)
+    if not p or p["status"] != "new":
+        return None
+    _conn.execute("UPDATE payouts SET status=? WHERE id=?", (status, pid))
+    if status == "rejected":  # вернуть деньги на баланс партнёра
+        _conn.execute("UPDATE users SET partner_balance=partner_balance+? WHERE id=?", (p["amount"], p["user_id"]))
+    _conn.commit()
+    return p
+
+
+def payouts_open():
+    return _conn.execute("SELECT * FROM payouts WHERE status='new' ORDER BY id").fetchall()
+
+
+def partners_list():
+    return _conn.execute("SELECT * FROM users WHERE partner_pct>0 ORDER BY partner_balance DESC").fetchall()
+
+
+# ---- тикеты ----
+def ticket_open_for(uid: int):
+    return _conn.execute("SELECT * FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
+
+
+def ticket_create(uid: int) -> int:
+    c = _conn.execute("INSERT INTO tickets (user_id, created_at, updated_at) VALUES (?,?,?)", (uid, now(), now()))
+    _conn.commit()
+    return c.lastrowid
+
+
+def ticket_get(tid: int):
+    return _conn.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+
+
+def ticket_msg(tid: int, from_admin: bool, text: str):
+    _conn.execute("INSERT INTO ticket_msgs (ticket_id, from_admin, text, at) VALUES (?,?,?,?)",
+                  (tid, 1 if from_admin else 0, text, now()))
+    _conn.execute("UPDATE tickets SET updated_at=?, status='open' WHERE id=?", (now(), tid))
+    _conn.commit()
+
+
+def ticket_close(tid: int):
+    _conn.execute("UPDATE tickets SET status='closed', updated_at=? WHERE id=?", (now(), tid))
+    _conn.commit()
+
+
+def ticket_msgs(tid: int, limit: int = 12):
+    return list(reversed(_conn.execute("SELECT * FROM ticket_msgs WHERE ticket_id=? ORDER BY id DESC LIMIT ?",
+                                       (tid, limit)).fetchall()))
+
+
+def tickets_list(status: str = "open", limit: int = 15):
+    return _conn.execute(
+        "SELECT t.*, u.name, u.username, (SELECT text FROM ticket_msgs m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1) AS last "
+        "FROM tickets t LEFT JOIN users u ON u.id=t.user_id WHERE t.status=? ORDER BY t.updated_at DESC LIMIT ?",
+        (status, limit)).fetchall()
+
+
+# ---- доходы и бэкап ----
+def revenue_by_day(days: int = 14) -> list[tuple[str, int, int]]:
+    """[(YYYY-MM-DD по МСК, рубли, звёзды)] за последние N дней."""
+    since = now() - days * 86400
+    rows = _conn.execute(
+        "SELECT date(created_at + 10800, 'unixepoch') d, "
+        "SUM(CASE WHEN currency='RUB' THEN amount ELSE 0 END), SUM(CASE WHEN currency='XTR' THEN amount ELSE 0 END) "
+        "FROM payments WHERE refunded=0 AND created_at>=? GROUP BY d ORDER BY d", (since,)).fetchall()
+    return [(r[0], r[1] or 0, r[2] or 0) for r in rows]
+
+
+def backup_to(path: str):
+    dst = sqlite3.connect(path)
+    with dst:
+        _conn.backup(dst)
+    dst.close()
+
+
+def set_referrer_if_empty(uid: int, referrer: int) -> bool:
+    if uid == referrer or not get_user(referrer):
+        return False
+    cur = _conn.execute("UPDATE users SET referrer=? WHERE id=? AND referrer IS NULL", (referrer, uid))
+    _conn.commit()
+    return cur.rowcount > 0
+
+
+def game_undo_round(uid: int, day: str):
+    _conn.execute("UPDATE game_days SET rounds=MAX(0, rounds-1) WHERE user_id=? AND day=?", (uid, day))
+    _conn.commit()

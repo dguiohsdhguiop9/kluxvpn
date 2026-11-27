@@ -5,6 +5,7 @@
   • 3X-UI 2.x  — клиенты внутри инбаунда: /panel/api/inbounds/addClient, /updateClient/{uuid}
 Версия определяется автоматически.
 """
+import base64
 import json
 import logging
 import re
@@ -126,6 +127,7 @@ class XUI:
         self._logged_in = False
         self._session = None
         self._inbound_cache = None
+        self.name = ""  # название сервера для пользователя, например «🇩🇪 Германия»
 
     @property
     def configured(self) -> bool:
@@ -221,11 +223,11 @@ class XUI:
         return self._inbound_cache
 
     # ---------- клиенты ----------
-    async def create_client(self, tg_id: int, expiry_ts: int, limit_ip: int = 3) -> str:
+    async def create_client(self, tg_id: int, expiry_ts: int, limit_ip: int = 3, client_uuid: str | None = None) -> str:
         """Создаёт ключ. Если клиент с таким email уже есть — продлевает его. Возвращает UUID."""
         mode = await self.detect()
         email = self.email_for(tg_id)
-        client_uuid = str(uuidlib.uuid4())
+        client_uuid = client_uuid or str(uuidlib.uuid4())
         flow = flow_for(await self.inbound())
         client = {
             "id": client_uuid,
